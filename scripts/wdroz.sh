@@ -31,7 +31,9 @@ git push
 
 echo
 echo "📲 4/4  Wysyłam aktualizację na kanał '$KANAL'…"
-eas update --branch "$KANAL" --message "$OPIS"
+# `--environment` obowiazkowo: bez niego EAS pyta interaktywnie, a skrypt
+# staje w polowie. Musi zgadzac sie z profilem, ktorym zbudowano APK.
+eas update --branch "$KANAL" --environment "$KANAL" --message "$OPIS"
 
 echo
 echo "🎉 Gotowe."

@@ -21,6 +21,7 @@ import {
   postZmiana,
   type ZapisOdpowiedz,
 } from './api';
+import { DATA_TESTOWA } from './config';
 import { krotkaData, poprawnaData, przesunDate } from './format';
 import { C } from './theme';
 
@@ -272,6 +273,28 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
             ))}
 
             <Pressable
+              style={[
+                s.chipData,
+                wybranaData === DATA_TESTOWA && !trybInnej && s.chipTestowyAktywny,
+              ]}
+              onPress={() => {
+                if (zapisuje) return;
+                setWybranaData(DATA_TESTOWA);
+                setTrybInnej(false);
+                setBlad(null);
+              }}
+            >
+              <Text
+                style={[
+                  s.chipTekst,
+                  wybranaData === DATA_TESTOWA && !trybInnej && s.chipTekstAktywny,
+                ]}
+              >
+                🧪 Test
+              </Text>
+            </Pressable>
+
+            <Pressable
               style={[s.chipData, trybInnej && s.chipAktywny]}
               onPress={() => {
                 if (zapisuje) return;
@@ -362,6 +385,7 @@ const s = StyleSheet.create({
     paddingVertical: 8,
   },
   chipAktywny: { backgroundColor: C.akcent, borderColor: C.akcent },
+  chipTestowyAktywny: { backgroundColor: C.ostrzezenie, borderColor: C.ostrzezenie },
   chipTekst: { color: C.tekstPrzygaszony, fontSize: 14, fontWeight: '600' },
   chipTekstAktywny: { color: C.tlo },
 

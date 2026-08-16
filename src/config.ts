@@ -17,3 +17,14 @@ export const TOKEN_KEY = 'glovo_api_token';
 
 /** Po tylu ms uznajemy, że serwer nie odpowiada. Kurier nie ma czasu czekać. */
 export const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * Dzień-śmietnik do testów.
+ *
+ * Wpisy z tą datą nie mieszają się z żadnym prawdziwym dniem pracy, więc da się
+ * je skasować jednym `DELETE ... WHERE date='2000-01-01'` bez ryzyka.
+ *
+ * Gdy aplikacja przestanie być testowana, usuń tę stałą i chip „Test"
+ * z `DodajWpis.tsx` — to jedyne dwa miejsca, które o niej wiedzą.
+ */
+export const DATA_TESTOWA = '2000-01-01';
