@@ -25,6 +25,7 @@ import {
 import { DATA_TESTOWA } from './config';
 import { krotkaData, normalizujGodzine, przesunDate } from './format';
 import { ocenLiczbe, ocenParagon, ocenZmiane, polacz, type Ocena } from './limity';
+import { nowyKlucz, toBrakSieci, type EndpointKolejki } from './kolejka';
 import { WybierzDate } from './WybierzDate';
 import { WybierzGodzine } from './WybierzGodzine';
 import { C } from './theme';
@@ -87,9 +88,31 @@ interface Props {
   dzisiaj: string | null;
   onZamknij: () => void;
   onZapisano: (wynik: ZapisOdpowiedz) => void;
+  /**
+   * Wpis do kolejki offline. Zwraca komunikat dla użytkownika albo `null`,
+   * gdy się nie udało (kolejka pełna, nieznana data serwera).
+   *
+   * `id` jest KLUCZEM, którego użyła nieudana próba na żywo. Ponowienie
+   * z tym samym kluczem serwer rozpozna jako powtórkę, więc jeśli żądanie
+   * jednak doszło, nie powstanie drugi wpis.
+   */
+  onDoKolejki: (wpis: {
+    endpoint: EndpointKolejki;
+    cialo: Record<string, unknown>;
+    opis: string;
+    data: string | null;
+    id: string;
+  }) => string | null;
 }
 
-export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: Props) {
+export function DodajWpis({
+  widoczny,
+  token,
+  dzisiaj,
+  onZamknij,
+  onZapisano,
+  onDoKolejki,
+}: Props) {
   const [rodzaj, setRodzaj] = useState<Rodzaj>('napiwek');
   const [kwota, setKwota] = useState('');
   const [litry, setLitry] = useState('');
@@ -150,16 +173,29 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
    * Rozgałęzienie na `zmiana` vs reszta jest tu celowe: dzięki niemu sprawdzenie
    * `wartosc === null` zawęża typ i nie trzeba nigdzie rzutować przez `as`.
    */
+  type DoKolejki = { endpoint: EndpointKolejki; cialo: Record<string, unknown> };
+
   type Przygotowane =
     | { ok: false; blad: string }
-    | { ok: true; ostrzezenie: string | null; zadanie: () => Promise<ZapisOdpowiedz> };
+    | {
+        ok: true;
+        ostrzezenie: string | null;
+        zadanie: (klucz: string) => Promise<ZapisOdpowiedz>;
+        doKolejki: DoKolejki;
+      };
 
   const przygotuj = (): Przygotowane => {
     // Data wspólna dla wszystkich rodzajów wpisu. `null` = decyduje serwer.
     const data: string | null = wybranaData;
     const zBledem = (blad: string): Przygotowane => ({ ok: false, blad });
-    const zOcena = (o: Ocena, zadanie: () => Promise<ZapisOdpowiedz>): Przygotowane =>
-      o.blad !== null ? zBledem(o.blad) : { ok: true, ostrzezenie: o.ostrzezenie, zadanie };
+    const zOcena = (
+      o: Ocena,
+      zadanie: (klucz: string) => Promise<ZapisOdpowiedz>,
+      doKolejki: DoKolejki
+    ): Przygotowane =>
+      o.blad !== null
+        ? zBledem(o.blad)
+        : { ok: true, ostrzezenie: o.ostrzezenie, zadanie, doKolejki };
 
     if (rodzaj === 'zmiana') {
       if (od.trim() === '' && doGodz.trim() === '')
@@ -171,7 +207,11 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
       if (od.trim() !== '' && wyjazd === null) return zBledem('Nie rozumiem godziny wyjazdu.');
       if (doGodz.trim() !== '' && zjazd === null) return zBledem('Nie rozumiem godziny zjazdu.');
 
-      return zOcena(ocenZmiane(wyjazd, zjazd), () => postZmiana(token, wyjazd, zjazd, data));
+      return zOcena(
+        ocenZmiane(wyjazd, zjazd),
+        (klucz) => postZmiana(token, wyjazd, zjazd, data, klucz),
+        { endpoint: '/api/v1/zmiana', cialo: { od: wyjazd, do: zjazd } }
+      );
     }
 
     const wartosc = liczba(kwota);
@@ -179,11 +219,23 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
 
     switch (rodzaj) {
       case 'napiwek':
-        return zOcena(ocenLiczbe('napiwek', wartosc), () => postNapiwek(token, wartosc, data));
+        return zOcena(
+          ocenLiczbe('napiwek', wartosc),
+          (klucz) => postNapiwek(token, wartosc, data, klucz),
+          { endpoint: '/api/v1/napiwek', cialo: { kwota: wartosc } }
+        );
       case 'dystans':
-        return zOcena(ocenLiczbe('dystans', wartosc), () => postDystans(token, wartosc, data));
+        return zOcena(
+          ocenLiczbe('dystans', wartosc),
+          (klucz) => postDystans(token, wartosc, data, klucz),
+          { endpoint: '/api/v1/dystans', cialo: { km: wartosc } }
+        );
       case 'brutto':
-        return zOcena(ocenLiczbe('brutto', wartosc), () => postBrutto(token, wartosc, data));
+        return zOcena(
+          ocenLiczbe('brutto', wartosc),
+          (klucz) => postBrutto(token, wartosc, data, klucz),
+          { endpoint: '/api/v1/brutto', cialo: { kwota: wartosc } }
+        );
       case 'paliwo': {
         const l = liczba(litry);
         const c = liczba(cena);
@@ -194,7 +246,8 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
             ocenLiczbe('cenaZaLitr', c),
             ocenParagon(wartosc, l, c)
           ),
-          () => postPaliwo(token, wartosc, l, c, data)
+          (klucz) => postPaliwo(token, wartosc, l, c, data, klucz),
+          { endpoint: '/api/v1/paliwo', cialo: { kwota: wartosc, litry: l, cenaZaLitr: c } }
         );
       }
     }
@@ -244,10 +297,19 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
     }
     setNadpisanie(null);
 
+    /**
+     * Klucz powstaje RAZ, przed próbą na żywo, i ten sam trafia do kolejki.
+     *
+     * Gdyby kolejka dostała nowy klucz, scenariusz „żądanie doszło, ale
+     * odpowiedź zginęła w tunelu" dałby DWA wpisy w bazie — czyli dokładnie
+     * to, przed czym idempotencja ma chronić.
+     */
+    const klucz = nowyKlucz(Date.now());
+    const opis = opisWpisu();
+
     setZapisuje(true);
     try {
-      const wynik = await gotowe.zadanie();
-      const opis = opisWpisu();
+      const wynik = await gotowe.zadanie(klucz);
       setWSesji((lista) => [
         ...lista.filter((w) => w.rodzaj !== rodzaj || !NADPISUJACE.includes(rodzaj)),
         { rodzaj, opis },
@@ -255,7 +317,31 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
       wyczysc();
       onZapisano(wynik);
     } catch (err) {
-      setBlad(err instanceof ApiError ? err.message : 'Nie udało się zapisać.');
+      // Brak sieci to nie jest błąd użytkownika — wpis idzie do kolejki.
+      if (err instanceof ApiError && toBrakSieci(err.status)) {
+        const komunikat = onDoKolejki({
+          endpoint: gotowe.doKolejki.endpoint,
+          cialo: gotowe.doKolejki.cialo,
+          opis,
+          // Data ZAMROŻONA w chwili dodania. `null` znaczyłoby „dzisiaj
+          // według serwera W MOMENCIE WYSYŁKI" — a wpis dodany o 23:50
+          // i wysłany o 00:10 wylądowałby w złej dobie.
+          data: wybranaData ?? dzisiaj,
+          id: klucz,
+        });
+        if (komunikat !== null) {
+          setWSesji((lista) => [
+            ...lista.filter((w) => w.rodzaj !== rodzaj || !NADPISUJACE.includes(rodzaj)),
+            { rodzaj, opis: `${opis} — czeka na wysłanie` },
+          ]);
+          wyczysc();
+          setBlad(null);
+        } else {
+          setBlad('Brak połączenia, a kolejki nie da się już rozszerzyć.');
+        }
+      } else {
+        setBlad(err instanceof ApiError ? err.message : 'Nie udało się zapisać.');
+      }
     } finally {
       setZapisuje(false);
     }
@@ -287,7 +373,12 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
       wyczysc();
       onZapisano({ dzien: wynik.dzien, ostrzezenie: wynik.komunikat });
     } catch (err) {
-      setBlad(err instanceof ApiError ? err.message : 'Nie udało się usunąć.');
+      // Jak wyżej: kasowanie nie idzie do kolejki (patrz `kolejka.ts`).
+      if (err instanceof ApiError && toBrakSieci(err.status)) {
+        setBlad('Kasowanie wymaga połączenia z serwerem — nie odkładam go na później.');
+      } else {
+        setBlad(err instanceof ApiError ? err.message : 'Nie udało się usunąć.');
+      }
     } finally {
       setZapisuje(false);
     }

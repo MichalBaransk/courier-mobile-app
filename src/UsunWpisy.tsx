@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { ApiError, postUsun, type UsunOdpowiedz, type ZakresUsuniecia } from './api';
+import { toBrakSieci } from './kolejka';
 import { godziny, km, zl } from './format';
 import { C } from './theme';
 import type { DailySummary } from './types';
@@ -144,7 +145,20 @@ export function UsunWpisy({
       setKomunikat(wynik.komunikat);
       onUsunieto(wynik);
     } catch (err) {
-      setBlad(err instanceof ApiError ? err.message : 'Nie udało się usunąć.');
+      // Kasowanie NIE trafia do kolejki offline — decyzja uzgodniona.
+      // Powód jest w nagłówku `kolejka.ts`: „usuń ostatni napiwek" wysłane
+      // cztery godziny później skasuje inny wpis niż ten, który użytkownik
+      // miał przed oczami. Kasowanie jest nieodwracalne, więc lepsza jest
+      // odmowa niż zgadywanie.
+      if (err instanceof ApiError && toBrakSieci(err.status)) {
+        setBlad(
+          'Kasowanie wymaga połączenia z serwerem. Bez zasięgu aplikacja nie wie, ' +
+            'który wpis jest „ostatni", więc nie odkłada tego na później — ' +
+            'skasowałaby coś innego, niż widzisz na ekranie.'
+        );
+      } else {
+        setBlad(err instanceof ApiError ? err.message : 'Nie udało się usunąć.');
+      }
     } finally {
       setPracuje(null);
     }

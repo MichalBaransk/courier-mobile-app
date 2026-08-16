@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -20,9 +21,25 @@ import {
   getOkres,
   getSaldo,
   getToday,
+  wyslijZKolejki,
   type UsunOdpowiedz,
   type ZapisOdpowiedz,
 } from './src/api';
+import {
+  dodaj as dodajDoKolejki,
+  nastepny,
+  oznaczOdrzucony,
+  podzielWygasle,
+  poNieudanej,
+  ponowWszystkie,
+  toBrakSieci,
+  usunPoWyslaniu,
+  usunRecznie,
+  type EndpointKolejki,
+  type WpisKolejki,
+} from './src/kolejka';
+import { wczytajKolejke, zapiszKolejke } from './src/kolejkaMagazyn';
+import { KolejkaPasek } from './src/KolejkaPasek';
 import { clearToken, readToken } from './src/storage';
 import { dataPoPolsku, przesunDate } from './src/format';
 import {
@@ -53,6 +70,72 @@ import type {
 } from './src/types';
 
 type Stan = 'wczytywanie' | 'brakTokena' | 'gotowe';
+
+/**
+ * Blokada równoległych wysyłek kolejki.
+ *
+ * Poza komponentem, bo `useState` aktualizuje się asynchronicznie i dwa
+ * wywołania w tym samym takcie zdążyłyby oba zobaczyć `false`. Wysyłka MUSI
+ * być pojedyncza: dwa równoległe upserty na ten sam dzień dają wynik zależny
+ * od kolejności odpowiedzi, czyli losowy.
+ */
+let wysylkaWToku = false;
+
+/**
+ * Przepycha kolejkę, jeden wpis naraz, aż do pierwszej porażki.
+ *
+ * Zatrzymanie po pierwszym niepowodzeniu jest celowe: gdy nie ma zasięgu,
+ * kolejny wpis też nie przejdzie, a każda próba to 10 sekund czekania
+ * i kawałek baterii.
+ */
+async function przeslijKolejke(
+  token: string,
+  poczatkowa: WpisKolejki[]
+): Promise<{ kolejka: WpisKolejki[]; wyslane: number; komunikat: string | null }> {
+  let kolejka = poczatkowa;
+  let wyslane = 0;
+
+  // Twardy limit obrotów — pętla nie ma prawa się zapętlić, nawet gdyby
+  // któraś funkcja kolejki zaczęła zwracać ten sam wpis w kółko.
+  for (let i = 0; i < 64; i++) {
+    const wpis = nastepny(kolejka, Date.now());
+    if (wpis === null) break;
+
+    try {
+      await wyslijZKolejki(token, wpis.endpoint, wpis.cialo, wpis.id);
+      kolejka = usunPoWyslaniu(kolejka, wpis.id);
+      wyslane += 1;
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : null;
+
+      if (toBrakSieci(status) || status === 409) {
+        // 409 = poprzednia próba z tym samym kluczem jeszcze trwa na serwerze.
+        // Jedno i drugie znaczy „spróbuj później", nie „to jest złe".
+        kolejka = poNieudanej(kolejka, wpis.id, Date.now());
+        return {
+          kolejka,
+          wyslane,
+          komunikat: wyslane > 0 ? `Wysłano ${wyslane}, reszta czeka.` : null,
+        };
+      }
+
+      // Serwer odpowiedział błędem trwałym (400 — zła wartość). Ponawianie
+      // nic nie zmieni, ale ciche skasowanie byłoby utratą danych, które
+      // użytkownik wpisał świadomie. Zostaje z komunikatem i czeka na decyzję.
+      kolejka = oznaczOdrzucony(
+        kolejka,
+        wpis.id,
+        err instanceof ApiError ? err.message : 'Serwer odrzucił ten wpis.'
+      );
+    }
+  }
+
+  return {
+    kolejka,
+    wyslane,
+    komunikat: wyslane > 0 ? `Wysłano ${wyslane} ${wyslane === 1 ? 'wpis' : 'wpisy'} z kolejki.` : null,
+  };
+}
 
 /** Ile dni wstecz stanowi tło do oceny pojedynczego dnia i kosztu paliwa na km. */
 const OKNO_ODNIESIENIA_DNI = 30;
@@ -105,6 +188,10 @@ export default function App() {
    * o tym samym.
    */
   const [sekcja, setSekcja] = useState<Sekcja>('kalendarz');
+
+  /** Niewysłane zapisy. Ładowane z dysku raz, przy starcie. */
+  const [kolejka, setKolejka] = useState<WpisKolejki[]>([]);
+  const [wysylamKolejke, setWysylamKolejke] = useState(false);
   /** Który cel jest właśnie ustawiany; `null` = modal zamknięty. */
   const [celDoUstawienia, setCelDoUstawienia] = useState<'MONTHLY' | 'WEEKLY' | null>(null);
   const [kwotaCelu, setKwotaCelu] = useState<number | null>(null);
@@ -119,6 +206,34 @@ export default function App() {
         setStan('brakTokena');
       }
     })();
+  }, []);
+
+  /**
+   * Kolejka z dysku — RAZ, przy starcie.
+   *
+   * Od razu odsiewamy wpisy starsze niż 48 h. Telefon leżący tydzień
+   * w szufladzie nie ma prawa wysłać po włączeniu napiwku sprzed tygodnia
+   * — dane byłyby prawdziwe, ale kurier dawno o nich zapomniał i nie miałby
+   * jak ich zweryfikować.
+   */
+  useEffect(() => {
+    void (async () => {
+      const zDysku = await wczytajKolejke();
+      const { zywe, wygasle } = podzielWygasle(zDysku, Date.now());
+      setKolejka(zywe);
+      if (wygasle.length > 0) {
+        await zapiszKolejke(zywe);
+        setPotwierdzenie(
+          `Porzucono ${wygasle.length} ${wygasle.length === 1 ? 'wpis starszy' : 'wpisy starsze'} niż 48 h.`
+        );
+      }
+    })();
+  }, []);
+
+  /** Każda zmiana kolejki idzie od razu na dysk — inaczej restart ją zjada. */
+  const ustawKolejke = useCallback((nowa: WpisKolejki[]) => {
+    setKolejka(nowa);
+    void zapiszKolejke(nowa).catch(() => {});
   }, []);
 
   const obsluzBlad = useCallback(async (err: unknown) => {
@@ -283,6 +398,9 @@ export default function App() {
   ]);
 
   const rozlacz = useCallback(async () => {
+    // Kolejki NIE kasujemy przy zmianie tokena — token się zmienia, ale wpisy
+    // należą do tego samego kuriera i mają dojechać. Skasowanie ich byłoby
+    // utratą danych przy operacji, która o danych w ogóle nie jest.
     await clearToken();
     setToken(null);
     setDzisiaj(null);
@@ -309,6 +427,87 @@ export default function App() {
     setWybranyTydzien((poprzedni) => (poprzedni === pn ? null : pn));
   }, []);
 
+  /**
+   * Wysyłka kolejki.
+   *
+   * Wywoływana po każdym udanym żądaniu (najtańszy dowód, że sieć działa),
+   * przy starcie i przy powrocie aplikacji z tła.
+   */
+  const wyslijKolejke = useCallback(
+    async (rowniezGdyOdlozone: boolean) => {
+      if (!token || wysylkaWToku) return;
+      if (kolejka.length === 0) return;
+
+      const doWyslania = rowniezGdyOdlozone ? ponowWszystkie(kolejka, Date.now()) : kolejka;
+      if (nastepny(doWyslania, Date.now()) === null) return;
+
+      wysylkaWToku = true;
+      setWysylamKolejke(true);
+      try {
+        const wynik = await przeslijKolejke(token, doWyslania);
+        ustawKolejke(wynik.kolejka);
+        if (wynik.komunikat !== null) setPotwierdzenie(wynik.komunikat);
+        if (wynik.wyslane > 0) {
+          if (miesiac !== null) void pobierzMiesiac(token, miesiac).catch(() => {});
+          if (wybranyDzien !== null) {
+            getDzien(token, wybranyDzien)
+              .then(setDzien)
+              .catch(() => {});
+          }
+          pobierzCele(token);
+        }
+      } finally {
+        wysylkaWToku = false;
+        setWysylamKolejke(false);
+      }
+    },
+    [token, kolejka, miesiac, wybranyDzien, ustawKolejke, pobierzMiesiac, pobierzCele]
+  );
+
+  /**
+   * Powrót z tła to najlepszy moment na ponowienie.
+   *
+   * `AppState` jest w rdzeniu React Native — bez `@react-native-community/netinfo`,
+   * który jest modułem natywnym i odciąłby aktualizacje OTA. Jego jedyną
+   * zaletą byłoby wcześniejsze wykrycie sieci, a to nie jest warte buildu.
+   */
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nowyStan: string) => {
+      if (nowyStan === 'active') void wyslijKolejke(true);
+    });
+    return () => sub.remove();
+  }, [wyslijKolejke]);
+
+  /** Próba wysyłki przy starcie — gdy tylko wiadomo, że jest token i kolejka. */
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token || kolejka.length === 0) return;
+    void wyslijKolejke(false);
+    // Celowo bez `wyslijKolejke` w zależnościach: ta funkcja zmienia się przy
+    // każdej zmianie kolejki, a to zrobiłoby z tego pętlę wysyłkową.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stan, token, kolejka.length]);
+
+  /** Dodanie wpisu do kolejki — wywoływane przez formularz przy braku sieci. */
+  const doKolejki = useCallback(
+    (wpis: {
+      endpoint: EndpointKolejki;
+      cialo: Record<string, unknown>;
+      opis: string;
+      data: string | null;
+      id: string;
+    }): string | null => {
+      const wynik = dodajDoKolejki(kolejka, wpis, Date.now());
+      if (!wynik.ok) {
+        setBlad(wynik.powod);
+        return null;
+      }
+      ustawKolejke(wynik.kolejka);
+      setBlad(null);
+      return `Brak połączenia — „${wpis.opis}" czeka w kolejce.`;
+    },
+    [kolejka, ustawKolejke]
+  );
+
   /** Wspólne odświeżenie po każdej zmianie danych — zapis albo kasowanie. */
   const poZmianie = useCallback(
     (nowyDzien: DailySummary, komunikat: string | null) => {
@@ -324,8 +523,10 @@ export default function App() {
         .catch(() => {});
       pobierzCele(token);
       if (dzisiaj !== null) pobierzOdniesienie(token, dzisiaj);
+      // Udane żądanie to najtańszy dowód, że sieć wróciła.
+      void wyslijKolejke(true);
     },
-    [token, miesiac, dzisiaj, pobierzMiesiac, pobierzCele, pobierzOdniesienie]
+    [token, miesiac, dzisiaj, pobierzMiesiac, pobierzCele, pobierzOdniesienie, wyslijKolejke]
   );
 
   if (stan === 'wczytywanie') {
@@ -433,6 +634,18 @@ export default function App() {
             <Text style={s.pasekOkTekst}>{potwierdzenie}</Text>
           </View>
         ) : null}
+
+        {/* Widoczny w KAŻDEJ sekcji — niewysłany wpis to nie jest sprawa
+            jednej zakładki i nie ma prawa zniknąć z oczu po przełączeniu. */}
+        <KolejkaPasek
+          kolejka={kolejka}
+          wysylam={wysylamKolejke}
+          onWyslij={() => {
+            setPotwierdzenie(null);
+            void wyslijKolejke(true);
+          }}
+          onUsun={(id) => ustawKolejke(usunRecznie(kolejka, id))}
+        />
 
         {/* ================= KALENDARZ: wpisy, dzień, tydzień, miesiąc ============ */}
         {sekcja === 'kalendarz' ? (
@@ -594,6 +807,7 @@ export default function App() {
               // Modal zostaje otwarty — zamyka go dopiero „Gotowe".
               poZmianie(wynik.dzien, wynik.ostrzezenie ?? 'Zapisano.');
             }}
+            onDoKolejki={doKolejki}
           />
 
           <UsunWpisy

@@ -32,19 +32,42 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, token: string, cialo?: unknown): Promise<T> {
+/**
+ * Klucz idempotencji.
+ *
+ * Wysyłany TYLKO wtedy, gdy wywołujący go poda — czyli przy zapisach z kolejki
+ * i przy zwykłych zapisach z formularza. Serwer bez tego nagłówka zachowuje
+ * się dokładnie jak wcześniej, więc starsza wersja aplikacji nadal działa.
+ */
+async function request<T>(
+  path: string,
+  token: string,
+  cialo?: unknown,
+  klucz?: string
+): Promise<T> {
+  const cialoJson = cialo === undefined ? undefined : JSON.stringify(cialo);
+  return zadanie<T>(path, token, cialoJson, klucz);
+}
+
+async function zadanie<T>(
+  path: string,
+  token: string,
+  cialoJson: string | undefined,
+  klucz: string | undefined
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  const naglowki: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (cialoJson !== undefined) naglowki['content-type'] = 'application/json';
+  if (klucz !== undefined) naglowki['idempotency-key'] = klucz;
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
-      method: cialo === undefined ? 'GET' : 'POST',
-      headers:
-        cialo === undefined
-          ? { Authorization: `Bearer ${token}` }
-          : { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      ...(cialo === undefined ? {} : { body: JSON.stringify(cialo) }),
+      method: cialoJson === undefined ? 'GET' : 'POST',
+      headers: naglowki,
+      ...(cialoJson === undefined ? {} : { body: cialoJson }),
       signal: controller.signal,
     });
   } catch {
@@ -139,8 +162,13 @@ export interface ZapisOdpowiedz {
   ostrzezenie: string | null;
 }
 
-async function zapisz(path: string, token: string, cialo: unknown): Promise<ZapisOdpowiedz> {
-  const dane = await request<unknown>(path, token, cialo);
+async function zapisz(
+  path: string,
+  token: string,
+  cialo: unknown,
+  klucz?: string
+): Promise<ZapisOdpowiedz> {
+  const dane = await request<unknown>(path, token, cialo, klucz);
   const w = dane as Partial<ZapisOdpowiedz> | null;
   if (!w || typeof w.dzien !== 'object' || w.dzien === null) {
     throw new ApiError('Serwer potwierdził zapis w nieoczekiwanym formacie.', null);
@@ -155,29 +183,31 @@ async function zapisz(path: string, token: string, cialo: unknown): Promise<Zapi
  * `null` znaczy „dzisiaj wyznaczone PO STRONIE SERWERA" — bezpieczniejsze niż
  * wysyłanie daty z zegara telefonu, który może mieć inną strefę.
  */
-export const postNapiwek = (token: string, kwota: number, data: string | null) =>
-  zapisz('/api/v1/napiwek', token, { kwota, data });
+export const postNapiwek = (token: string, kwota: number, data: string | null, klucz?: string) =>
+  zapisz('/api/v1/napiwek', token, { kwota, data }, klucz);
 
 export const postPaliwo = (
   token: string,
   kwota: number,
   litry: number | null,
   cenaZaLitr: number | null,
-  data: string | null
-) => zapisz('/api/v1/paliwo', token, { kwota, litry, cenaZaLitr, data });
+  data: string | null,
+  klucz?: string
+) => zapisz('/api/v1/paliwo', token, { kwota, litry, cenaZaLitr, data }, klucz);
 
-export const postDystans = (token: string, km: number, data: string | null) =>
-  zapisz('/api/v1/dystans', token, { km, data });
+export const postDystans = (token: string, km: number, data: string | null, klucz?: string) =>
+  zapisz('/api/v1/dystans', token, { km, data }, klucz);
 
-export const postBrutto = (token: string, kwota: number, data: string | null) =>
-  zapisz('/api/v1/brutto', token, { kwota, data });
+export const postBrutto = (token: string, kwota: number, data: string | null, klucz?: string) =>
+  zapisz('/api/v1/brutto', token, { kwota, data }, klucz);
 
 export const postZmiana = (
   token: string,
   od: string | null,
   doGodz: string | null,
-  data: string | null
-) => zapisz('/api/v1/zmiana', token, { od, do: doGodz, data });
+  data: string | null,
+  klucz?: string
+) => zapisz('/api/v1/zmiana', token, { od, do: doGodz, data }, klucz);
 
 /* ========================================================================== */
 /*  Historia (krok 4)                                                         */
@@ -244,9 +274,10 @@ export function getCele(token: string): Promise<Cele> {
 export function postCel(
   token: string,
   okres: 'MONTHLY' | 'WEEKLY',
-  kwota: number
+  kwota: number,
+  klucz?: string
 ): Promise<{ postep: TargetProgress | null }> {
-  return request<{ postep: TargetProgress | null }>('/api/v1/cel', token, { okres, kwota });
+  return request<{ postep: TargetProgress | null }>('/api/v1/cel', token, { okres, kwota }, klucz);
 }
 
 /**
@@ -275,4 +306,31 @@ export async function getOferty(
     token
   );
   return Array.isArray(dane.items) ? (dane.items as CourseOfferItem[]) : [];
+}
+
+/* ========================================================================== */
+/*  Wysyłka z kolejki offline (krok 5)                                        */
+/* ========================================================================== */
+
+/**
+ * Wysyła gotowy, zserializowany wpis z kolejki.
+ *
+ * Ciało idzie DOSŁOWNIE takie, jakie zostało zapisane w chwili dodania do
+ * kolejki — bez ponownej serializacji i bez uzupełniania czegokolwiek.
+ * Tam jest już zamrożona data serwerowa i to jest cały sens: wpis dodany
+ * o 23:50 ma trafić do wczorajszej doby, nawet gdy wychodzi o 00:10.
+ *
+ * `klucz` to `Idempotency-Key`. Dzięki niemu ponowienie po timeoucie, przy
+ * którym żądanie JEDNAK doszło, nie utworzy drugiego napiwka.
+ *
+ * Rzuca `ApiError` — wywołujący rozróżnia po `status`: `null` znaczy „nie
+ * doszło, spróbuj ponownie", cokolwiek innego znaczy „serwer odpowiedział".
+ */
+export async function wyslijZKolejki(
+  token: string,
+  endpoint: string,
+  cialoJson: string,
+  klucz: string
+): Promise<void> {
+  await zadanie<unknown>(endpoint, token, cialoJson, klucz);
 }
