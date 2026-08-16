@@ -23,14 +23,19 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, token: string): Promise<T> {
+async function request<T>(path: string, token: string, cialo?: unknown): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      method: cialo === undefined ? 'GET' : 'POST',
+      headers:
+        cialo === undefined
+          ? { Authorization: `Bearer ${token}` }
+          : { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      ...(cialo === undefined ? {} : { body: JSON.stringify(cialo) }),
       signal: controller.signal,
     });
   } catch {
@@ -50,14 +55,28 @@ async function request<T>(path: string, token: string): Promise<T> {
   if (response.status === 503) {
     throw new ApiError('API jest wyłączone — brak API_TOKEN w .env na serwerze.', 503);
   }
+
   if (!response.ok) {
-    throw new ApiError(`Serwer zwrócił błąd ${response.status}.`, response.status);
+    // Backend przy 400 zwraca `{ "error": "Pole \"kwota\" musi być…" }`.
+    // Te komunikaty są pisane pod użytkownika, więc pokazujemy je wprost
+    // zamiast generycznego „błąd 400" — po to powstały.
+    const zSerwera = await odczytajKomunikatBledu(response);
+    throw new ApiError(zSerwera ?? `Serwer zwrócił błąd ${response.status}.`, response.status);
   }
 
   try {
     return (await response.json()) as T;
   } catch {
     throw new ApiError('Odpowiedź serwera nie jest poprawnym JSON-em.', response.status);
+  }
+}
+
+async function odczytajKomunikatBledu(response: Response): Promise<string | null> {
+  try {
+    const tresc = (await response.json()) as { error?: unknown };
+    return typeof tresc.error === 'string' && tresc.error.length > 0 ? tresc.error : null;
+  } catch {
+    return null;
   }
 }
 
@@ -92,3 +111,50 @@ export async function getToday(token: string): Promise<DailySummary> {
   assertDailySummary(data);
   return data;
 }
+
+/* ========================================================================== */
+/*  Zapisy (krok 3a)                                                          */
+/* ========================================================================== */
+
+/**
+ * Każdy zapis zwraca świeży stan dnia, więc po dodaniu wpisu nie trzeba
+ * osobno odpytywać `/dzien` — jedna podróż zamiast dwóch.
+ *
+ * ⚠️ Endpointy NIE są idempotentne (krok 3b). Napiwek i paliwo to czyste
+ * `INSERT` po stronie bazy: dwa kliknięcia = dwa wpisy. Dlatego przycisk
+ * zapisu blokuje się na czas żądania.
+ */
+export interface ZapisOdpowiedz {
+  dzien: DailySummary;
+  /** Np. ostrzeżenie o zmianie dłuższej niż 16 h. */
+  ostrzezenie: string | null;
+}
+
+async function zapisz(path: string, token: string, cialo: unknown): Promise<ZapisOdpowiedz> {
+  const dane = await request<unknown>(path, token, cialo);
+  const w = dane as Partial<ZapisOdpowiedz> | null;
+  if (!w || typeof w.dzien !== 'object' || w.dzien === null) {
+    throw new ApiError('Serwer potwierdził zapis w nieoczekiwanym formacie.', null);
+  }
+  assertDailySummary(w.dzien);
+  return { dzien: w.dzien, ostrzezenie: typeof w.ostrzezenie === 'string' ? w.ostrzezenie : null };
+}
+
+export const postNapiwek = (token: string, kwota: number) =>
+  zapisz('/api/v1/napiwek', token, { kwota });
+
+export const postPaliwo = (
+  token: string,
+  kwota: number,
+  litry: number | null,
+  cenaZaLitr: number | null
+) => zapisz('/api/v1/paliwo', token, { kwota, litry, cenaZaLitr });
+
+export const postDystans = (token: string, km: number) =>
+  zapisz('/api/v1/dystans', token, { km });
+
+export const postBrutto = (token: string, kwota: number) =>
+  zapisz('/api/v1/brutto', token, { kwota });
+
+export const postZmiana = (token: string, od: string | null, doGodz: string | null) =>
+  zapisz('/api/v1/zmiana', token, { od, do: doGodz });

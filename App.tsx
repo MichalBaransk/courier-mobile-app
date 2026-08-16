@@ -11,25 +11,12 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
-import { ApiError, getInfo, getToday } from './src/api';
+import { ApiError, getInfo, getToday, type ZapisOdpowiedz } from './src/api';
 import { clearToken, readToken, saveToken } from './src/storage';
 import { dataPoPolsku, godziny, km, litry, zl, zlZeZnakiem } from './src/format';
+import { DodajWpis } from './src/DodajWpis';
+import { C } from './src/theme';
 import type { DailySummary } from './src/types';
-
-/* ========================================================================== */
-/*  Kolory — ciemny motyw. Kurier patrzy w telefon też po zmroku.              */
-/* ========================================================================== */
-
-const C = {
-  tlo: '#0f1115',
-  karta: '#191d24',
-  obramowanie: '#272d38',
-  tekst: '#e8ecf2',
-  tekstPrzygaszony: '#8b95a5',
-  akcent: '#4ade80',
-  ostrzezenie: '#fbbf24',
-  blad: '#f87171',
-};
 
 /* ========================================================================== */
 /*  Ekran wpisania tokena                                                     */
@@ -200,6 +187,9 @@ export default function App() {
   const [dane, setDane] = useState<DailySummary | null>(null);
   const [blad, setBlad] = useState<string | null>(null);
   const [odswiezam, setOdswiezam] = useState(false);
+  const [dodawanie, setDodawanie] = useState(false);
+  /** Krótkie potwierdzenie po zapisie; znika przy następnej akcji. */
+  const [potwierdzenie, setPotwierdzenie] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -292,6 +282,22 @@ export default function App() {
           </View>
         ) : null}
 
+        {potwierdzenie ? (
+          <View style={s.pasekOk}>
+            <Text style={s.pasekOkTekst}>{potwierdzenie}</Text>
+          </View>
+        ) : null}
+
+        <Pressable
+          style={({ pressed }) => [s.dodaj, pressed && s.przyciskWcisniety]}
+          onPress={() => {
+            setPotwierdzenie(null);
+            setDodawanie(true);
+          }}
+        >
+          <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
+        </Pressable>
+
         {dane ? (
           <EkranDnia dane={dane} />
         ) : !blad ? (
@@ -304,6 +310,22 @@ export default function App() {
           <Text style={s.przyciskTekstowyTekst}>Zmień token</Text>
         </Pressable>
       </ScrollView>
+
+      {token ? (
+        <DodajWpis
+          widoczny={dodawanie}
+          token={token}
+          onZamknij={() => setDodawanie(false)}
+          onZapisano={(wynik: ZapisOdpowiedz) => {
+            // Serwer odesłał świeży stan dnia razem z potwierdzeniem zapisu,
+            // więc odświeżamy kartę bez dodatkowego zapytania.
+            setDane(wynik.dzien);
+            setBlad(null);
+            setPotwierdzenie(wynik.ostrzezenie ?? 'Zapisano.');
+            setDodawanie(false);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -393,6 +415,25 @@ const s = StyleSheet.create({
   },
   pasekBleduTekst: { color: C.blad, fontSize: 14, fontWeight: '600' },
   pasekBleduPodpowiedz: { color: C.tekstPrzygaszony, fontSize: 12, marginTop: 4 },
+
+  pasekOk: {
+    backgroundColor: '#16251b',
+    borderColor: C.akcent,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  pasekOkTekst: { color: C.akcent, fontSize: 14, fontWeight: '600' },
+
+  dodaj: {
+    backgroundColor: C.akcent,
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  dodajTekst: { color: C.tlo, fontSize: 16, fontWeight: '700' },
 
   blad: { color: C.blad, fontSize: 13, marginTop: 12, textAlign: 'center' },
 
