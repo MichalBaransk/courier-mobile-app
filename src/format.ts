@@ -32,7 +32,9 @@ export function dataPoPolsku(iso: string): string {
 
   // Południe UTC, żeby żadne przesunięcie strefy nie zmieniło dnia tygodnia.
   const d = new Date(Date.UTC(rok, miesiac - 1, dzien, 12));
-  return `${DNI[d.getUTCDay()]}, ${dzien} ${MIESIACE[miesiac - 1]}`;
+
+  // Tylko PIERWSZA litera z wielkiej. Po polsku nazwy miesiecy sa z malej,
+  // wiec `textTransform: 'capitalize'` w stylach robilo z tego „16 Sierpnia”.
   const tekst = `${DNI[d.getUTCDay()]}, ${dzien} ${MIESIACE[miesiac - 1]}`;
   return tekst.charAt(0).toUpperCase() + tekst.slice(1);
 }
