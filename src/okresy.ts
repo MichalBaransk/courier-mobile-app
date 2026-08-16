@@ -76,3 +76,38 @@ export function dniZakresu(zakres: Zakres): string[] {
   }
   return dni;
 }
+
+const MIES_DOPELNIACZ = [
+  'stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca',
+  'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia',
+];
+const MIES_SKROT = [
+  'sty', 'lut', 'mar', 'kwi', 'maj', 'cze',
+  'lip', 'sie', 'wrz', 'paź', 'lis', 'gru',
+];
+
+/** `10–16 sierpnia`, a przy przełomie miesiąca `28 lip – 3 sie`. */
+export function etykietaTygodnia(iso: string): string {
+  const z = zakresTygodnia(iso);
+  const [, m1 = '01', d1 = '01'] = z.od.split('-');
+  const [, m2 = '01', d2 = '01'] = z.do.split('-');
+
+  if (m1 === m2) return `${Number(d1)}–${Number(d2)} ${MIES_DOPELNIACZ[Number(m1) - 1]}`;
+  return `${Number(d1)} ${MIES_SKROT[Number(m1) - 1]} – ${Number(d2)} ${MIES_SKROT[Number(m2) - 1]}`;
+}
+
+/**
+ * Czy krok w przód wyszedłby poza dzisiaj.
+ *
+ * Porównujemy POCZĄTKI okresów, nie same daty: tydzień z dzisiaj kończy się
+ * w przyszłości i blokowanie po dacie końcowej odcięłoby bieżący tydzień.
+ */
+export function przyszloscZablokowana(
+  widok: 'dzien' | 'tydzien' | 'miesiac',
+  kursor: string,
+  dzisiaj: string
+): boolean {
+  if (widok === 'dzien') return kursor >= dzisiaj;
+  if (widok === 'tydzien') return zakresTygodnia(kursor).od >= zakresTygodnia(dzisiaj).od;
+  return zakresMiesiaca(kursor).od >= zakresMiesiaca(dzisiaj).od;
+}

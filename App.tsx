@@ -21,7 +21,14 @@ import {
 } from './src/api';
 import { clearToken, readToken } from './src/storage';
 import { dataPoPolsku, przesunDate } from './src/format';
-import { nazwaMiesiaca, numerTygodniaISO, zakresMiesiaca, zakresTygodnia } from './src/okresy';
+import {
+  etykietaTygodnia,
+  nazwaMiesiaca,
+  numerTygodniaISO,
+  przyszloscZablokowana,
+  zakresMiesiaca,
+  zakresTygodnia,
+} from './src/okresy';
 import { DodajWpis } from './src/DodajWpis';
 import { EkranTokena } from './src/EkranTokena';
 import { KartaDnia, KartaOkresu, KartaSalda } from './src/Karty';
@@ -122,13 +129,27 @@ export default function App() {
     [dzisiaj, obsluzBlad]
   );
 
+  /**
+   * JEDNO miejsce, w którym cokolwiek się pobiera.
+   *
+   * Nawigacja wyłącznie ustawia stan (`kursor`, `widok`) — nigdy nie woła
+   * pobierania sama. Poprzednia wersja robiła oba naraz i przy dotknięciu dnia
+   * w kalendarzu powstawał wyścig: efekt startował ze STARYM kursorem, czyli
+   * kotwicą miesiąca, i nadpisywał wynik kliknięcia. Stąd „wybieranie z
+   * kalendarza nie działa".
+   */
   useEffect(() => {
-    if (stan !== 'gotowe' || !token) return;
+    if (stan !== 'gotowe' || !token || kursor === null) return;
     void pobierz(token, widok, kursor);
-    // `kursor` i `pobierz` celowo poza zależnościami — kursor zmienia nawigacja,
-    // która sama woła `pobierz`. Trzymanie ich tutaj dawałoby podwójne zapytanie.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stan, token, widok]);
+  }, [stan, token, widok, kursor]);
+
+  /** Pierwsze pobranie: serwer podaje dzisiejszą datę i ona staje się kursorem. */
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token || kursor !== null) return;
+    void pobierz(token, 'dzien', null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stan, token]);
 
   useEffect(() => {
     if (stan !== 'gotowe' || !token) return;
@@ -150,13 +171,10 @@ export default function App() {
               // 31 → 30 dni nie gubił lutego ani nie przeskakiwał o dwa.
               przesunDate(zakresMiesiaca(kursor).od, kierunek === 1 ? 32 : -1);
 
-      // Nie wchodzimy w przyszłość — nie ma tam czego pokazać.
-      if (widok === 'dzien' && dzisiaj !== null && kierunek === 1 && nowy > dzisiaj) return;
-
       setPotwierdzenie(null);
-      void pobierz(token, widok, nowy);
+      setKursor(nowy);
     },
-    [token, kursor, widok, dzisiaj, pobierz]
+    [token, kursor, widok]
   );
 
   const odswiez = useCallback(async () => {
@@ -177,14 +195,11 @@ export default function App() {
   }, []);
 
   /** Dotknięcie słupka albo dnia w kalendarzu przenosi do widoku dnia. */
-  const otworzDzien = useCallback(
-    (data: string) => {
-      if (!token) return;
-      setWidok('dzien');
-      void pobierz(token, 'dzien', data);
-    },
-    [token, pobierz]
-  );
+  const otworzDzien = useCallback((data: string) => {
+    setPotwierdzenie(null);
+    setKursor(data);
+    setWidok('dzien');
+  }, []);
 
   if (stan === 'wczytywanie') {
     return (
@@ -211,16 +226,18 @@ export default function App() {
 
   const tydzien = kursor === null ? null : zakresTygodnia(kursor);
   const naglowek =
-    kursor === null || tydzien === null
+    kursor === null
       ? '…'
       : widok === 'dzien'
         ? dataPoPolsku(kursor)
         : widok === 'tydzien'
-          ? `Tydzień ${numerTygodniaISO(kursor)} · ${tydzien.od.slice(8)}–${tydzien.do.slice(8)}`
+          ? `Tydzień ${numerTygodniaISO(kursor)} · ${etykietaTygodnia(kursor)}`
           : nazwaMiesiaca(kursor);
 
+  // Blokada dotyczy KAŻDEGO widoku — przyszły tydzień i miesiąc są równie puste
+  // jak przyszły dzień.
   const wPrzodZablokowane =
-    widok === 'dzien' && dzisiaj !== null && kursor !== null && kursor >= dzisiaj;
+    kursor !== null && dzisiaj !== null && przyszloscZablokowana(widok, kursor, dzisiaj);
 
   return (
     <View style={s.tlo}>
@@ -285,18 +302,21 @@ export default function App() {
           </View>
         ) : null}
 
+        {/* Dodawanie dostępne z każdego widoku — wpis i tak trafia na dzień
+            wybrany w samym formularzu, więc blokowanie go w tygodniu było
+            ograniczeniem bez powodu. */}
+        <Pressable
+          style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
+          onPress={() => {
+            setPotwierdzenie(null);
+            setDodawanie(true);
+          }}
+        >
+          <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
+        </Pressable>
+
         {widok === 'dzien' ? (
           <>
-            <Pressable
-              style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
-              onPress={() => {
-                setPotwierdzenie(null);
-                setDodawanie(true);
-              }}
-            >
-              <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
-            </Pressable>
-
             {dzien ? <KartaDnia dane={dzien} /> : null}
             {saldo ? <KartaSalda saldo={saldo} /> : null}
           </>
@@ -306,7 +326,7 @@ export default function App() {
           <WykresTygodnia
             zakres={tydzien}
             dni={dniOkresu}
-            wybrany={null}
+            wybrany={kursor}
             onWybierz={otworzDzien}
           />
         ) : null}
@@ -315,7 +335,7 @@ export default function App() {
           <KalendarzMiesiaca
             zakres={zakresMiesiaca(kursor)}
             dni={dniOkresu}
-            wybrany={null}
+            wybrany={kursor}
             onWybierz={otworzDzien}
           />
         ) : null}
@@ -345,6 +365,7 @@ export default function App() {
             setDzien(wynik.dzien);
             setKursor(wynik.dzien.date);
             setWidok('dzien');
+            setDniOkresu([]);
             setBlad(null);
             setPotwierdzenie(wynik.ostrzezenie ?? 'Zapisano.');
             setDodawanie(false);

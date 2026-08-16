@@ -22,7 +22,8 @@ import {
   type ZapisOdpowiedz,
 } from './api';
 import { DATA_TESTOWA } from './config';
-import { krotkaData, poprawnaData, przesunDate } from './format';
+import { krotkaData, przesunDate } from './format';
+import { WybierzDate } from './WybierzDate';
 import { C } from './theme';
 
 /**
@@ -81,8 +82,7 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
 
   /** `null` = dzisiaj, czyli data wyznaczona po stronie serwera. */
   const [wybranaData, setWybranaData] = useState<string | null>(null);
-  const [trybInnej, setTrybInnej] = useState(false);
-  const [innaData, setInnaData] = useState('');
+  const [kalendarz, setKalendarz] = useState(false);
 
   const wyczysc = () => {
     setKwota('');
@@ -97,8 +97,7 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
   const wyczyscWszystko = () => {
     wyczysc();
     setWybranaData(null);
-    setTrybInnej(false);
-    setInnaData('');
+    setKalendarz(false);
   };
 
   const zamknij = () => {
@@ -112,13 +111,8 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
    * `wartosc === null` zawęża typ i nie trzeba nigdzie rzutować przez `as`.
    */
   const zbudujZadanie = (): (() => Promise<ZapisOdpowiedz>) | string => {
-    // Data ustalana raz, wspólna dla wszystkich rodzajów wpisu.
-    let data: string | null = wybranaData;
-    if (trybInnej) {
-      const wpisana = innaData.trim();
-      if (!poprawnaData(wpisana)) return 'Data musi być w formacie RRRR-MM-DD i istnieć w kalendarzu.';
-      data = wpisana;
-    }
+    // Data wspólna dla wszystkich rodzajów wpisu. `null` = decyduje serwer.
+    const data: string | null = wybranaData;
 
     if (rodzaj === 'zmiana') {
       const doWyslania = od.trim();
@@ -186,6 +180,17 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
           return { iso, etykieta: n === 1 ? 'Wczoraj' : krotkaData(iso) };
         });
 
+  /**
+   * Data wybrana z kalendarza, czyli taka, która nie jest żadnym ze skrótów.
+   * Służy tylko do podpisania chipu — sam zapis idzie z `wybranaData`.
+   */
+  const dataZKalendarza =
+    wybranaData !== null &&
+    wybranaData !== DATA_TESTOWA &&
+    !dniWstecz.some((d) => d.iso === wybranaData)
+      ? wybranaData
+      : null;
+
   const pole = (
     etykieta: string,
     wartosc: string,
@@ -238,17 +243,14 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
           <Text style={s.etykieta}>Dzień wpisu</Text>
           <View style={s.chipy}>
             <Pressable
-              style={[s.chipData, wybranaData === null && !trybInnej && s.chipAktywny]}
+              style={[s.chipData, wybranaData === null && s.chipAktywny]}
               onPress={() => {
                 if (zapisuje) return;
                 setWybranaData(null);
-                setTrybInnej(false);
                 setBlad(null);
               }}
             >
-              <Text
-                style={[s.chipTekst, wybranaData === null && !trybInnej && s.chipTekstAktywny]}
-              >
+              <Text style={[s.chipTekst, wybranaData === null && s.chipTekstAktywny]}>
                 Dzisiaj
               </Text>
             </Pressable>
@@ -256,59 +258,46 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
             {dniWstecz.map((d) => (
               <Pressable
                 key={d.iso}
-                style={[s.chipData, wybranaData === d.iso && !trybInnej && s.chipAktywny]}
+                style={[s.chipData, wybranaData === d.iso && s.chipAktywny]}
                 onPress={() => {
                   if (zapisuje) return;
                   setWybranaData(d.iso);
-                  setTrybInnej(false);
                   setBlad(null);
                 }}
               >
-                <Text
-                  style={[s.chipTekst, wybranaData === d.iso && !trybInnej && s.chipTekstAktywny]}
-                >
+                <Text style={[s.chipTekst, wybranaData === d.iso && s.chipTekstAktywny]}>
                   {d.etykieta}
                 </Text>
               </Pressable>
             ))}
 
             <Pressable
-              style={[
-                s.chipData,
-                wybranaData === DATA_TESTOWA && !trybInnej && s.chipTestowyAktywny,
-              ]}
+              style={[s.chipData, wybranaData === DATA_TESTOWA && s.chipTestowyAktywny]}
               onPress={() => {
                 if (zapisuje) return;
                 setWybranaData(DATA_TESTOWA);
-                setTrybInnej(false);
                 setBlad(null);
               }}
             >
-              <Text
-                style={[
-                  s.chipTekst,
-                  wybranaData === DATA_TESTOWA && !trybInnej && s.chipTekstAktywny,
-                ]}
-              >
+              <Text style={[s.chipTekst, wybranaData === DATA_TESTOWA && s.chipTekstAktywny]}>
                 🧪 Test
               </Text>
             </Pressable>
 
             <Pressable
-              style={[s.chipData, trybInnej && s.chipAktywny]}
+              style={[s.chipData, dataZKalendarza !== null && s.chipAktywny]}
+              disabled={dzisiaj === null}
               onPress={() => {
                 if (zapisuje) return;
-                setTrybInnej(true);
+                setKalendarz(true);
                 setBlad(null);
               }}
             >
-              <Text style={[s.chipTekst, trybInnej && s.chipTekstAktywny]}>Inna…</Text>
+              <Text style={[s.chipTekst, dataZKalendarza !== null && s.chipTekstAktywny]}>
+                {dataZKalendarza === null ? '📅 Inna…' : `📅 ${krotkaData(dataZKalendarza)}`}
+              </Text>
             </Pressable>
           </View>
-
-          {trybInnej
-            ? pole('Data wpisu', innaData, setInnaData, dzisiaj ?? '2026-08-16', false)
-            : null}
 
           {rodzaj === 'napiwek' ? pole('Kwota napiwku', kwota, setKwota, '5,50') : null}
           {rodzaj === 'dystans' ? pole('Przejechane dzisiaj', kwota, setKwota, '142,3') : null}
@@ -357,6 +346,19 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {dzisiaj !== null ? (
+        <WybierzDate
+          widoczny={kalendarz}
+          wartosc={wybranaData}
+          maks={dzisiaj}
+          onWybierz={(data) => {
+            setWybranaData(data);
+            setKalendarz(false);
+          }}
+          onZamknij={() => setKalendarz(false)}
+        />
+      ) : null}
     </Modal>
   );
 }
