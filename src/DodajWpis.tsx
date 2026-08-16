@@ -23,8 +23,9 @@ import {
   type ZapisOdpowiedz,
 } from './api';
 import { DATA_TESTOWA } from './config';
-import { krotkaData, przesunDate } from './format';
+import { krotkaData, normalizujGodzine, przesunDate } from './format';
 import { WybierzDate } from './WybierzDate';
+import { WybierzGodzine } from './WybierzGodzine';
 import { C } from './theme';
 
 /**
@@ -95,9 +96,13 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
    * (a do tego przeskok do zakładki dnia) było najbardziej uciążliwą rzeczą
    * w poprzedniej wersji.
    */
-  const [wSesji, setWSesji] = useState<string[]>([]);
+  const [wSesji, setWSesji] = useState<Array<{ rodzaj: Rodzaj; opis: string }>>([]);
   /** Kasowanie dnia wymaga drugiego dotknięcia — bez cofania. */
   const [potwierdzKasowanie, setPotwierdzKasowanie] = useState(false);
+  /** Które pole godziny otwarło zegar: `od`, `do`, albo żadne. */
+  const [zegar, setZegar] = useState<'od' | 'do' | null>(null);
+  /** Ostrzeżenie o nadpisaniu wpisu z tej sesji — czeka na drugie dotknięcie. */
+  const [nadpisanie, setNadpisanie] = useState<string | null>(null);
 
   /** `null` = dzisiaj, czyli data wyznaczona po stronie serwera. */
   const [wybranaData, setWybranaData] = useState<string | null>(null);
@@ -119,6 +124,8 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
     setKalendarz(false);
     setWSesji([]);
     setPotwierdzKasowanie(false);
+    setNadpisanie(null);
+    setZegar(null);
   };
 
   const zamknij = () => {
@@ -136,16 +143,15 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
     const data: string | null = wybranaData;
 
     if (rodzaj === 'zmiana') {
-      const doWyslania = od.trim();
-      const doZjazdu = doGodz.trim();
-      if (doWyslania === '' && doZjazdu === '') return 'Podaj przynajmniej jedną godzinę.';
-      return () =>
-        postZmiana(
-          token,
-          doWyslania === '' ? null : doWyslania,
-          doZjazdu === '' ? null : doZjazdu,
-          data
-        );
+      if (od.trim() === '' && doGodz.trim() === '') return 'Podaj przynajmniej jedną godzinę.';
+
+      // `9` znaczy `09:00`, `930` znaczy `09:30` — serwer przyjmuje tylko GG:MM.
+      const wyjazd = od.trim() === '' ? null : normalizujGodzine(od);
+      const zjazd = doGodz.trim() === '' ? null : normalizujGodzine(doGodz);
+      if (od.trim() !== '' && wyjazd === null) return 'Nie rozumiem godziny wyjazdu.';
+      if (doGodz.trim() !== '' && zjazd === null) return 'Nie rozumiem godziny zjazdu.';
+
+      return () => postZmiana(token, wyjazd, zjazd, data);
     }
 
     const wartosc = liczba(kwota);
@@ -177,10 +183,27 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
       return;
     }
 
+    /**
+     * Ostrzeżenie o nadpisaniu — tylko dla rodzajów, które serwer NADPISUJE.
+     *
+     * `dystans`, `brutto` i `zmiana` idą przez upsert na `daily_records`, więc
+     * drugi zapis kasuje pierwszy bez śladu. Napiwki i paliwo to osobne wiersze
+     * i dodanie drugiego jest zwykle zamierzone — tam ostrzeżenie tylko
+     * przeszkadzałoby.
+     */
+    const nadpisujace: Rodzaj[] = ['dystans', 'brutto', 'zmiana'];
+    const poprzedni = wSesji.find((w) => w.rodzaj === rodzaj);
+    if (nadpisujace.includes(rodzaj) && poprzedni && nadpisanie === null) {
+      setNadpisanie(poprzedni.opis);
+      return;
+    }
+    setNadpisanie(null);
+
     setZapisuje(true);
     try {
       const wynik = await zadanie();
-      setWSesji((lista) => [...lista, opisWpisu()]);
+      const opis = opisWpisu();
+      setWSesji((lista) => [...lista.filter((w) => w.rodzaj !== rodzaj || !nadpisujace.includes(rodzaj)), { rodzaj, opis }]);
       wyczysc();
       onZapisano(wynik);
     } catch (err) {
@@ -192,7 +215,9 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
 
   /** Krótki opis tego, co właśnie poszło — do listy „zapisane w tej sesji". */
   const opisWpisu = (): string => {
-    if (rodzaj === 'zmiana') return `zmiana ${od.trim() || '…'}–${doGodz.trim() || '…'}`;
+    if (rodzaj === 'zmiana') {
+      return `zmiana ${normalizujGodzine(od) ?? '…'}–${normalizujGodzine(doGodz) ?? '…'}`;
+    }
     const w = kwota.trim();
     if (rodzaj === 'napiwek') return `napiwek ${w} zł`;
     if (rodzaj === 'dystans') return `dystans ${w} km`;
@@ -242,6 +267,40 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
     !dniWstecz.some((d) => d.iso === wybranaData)
       ? wybranaData
       : null;
+
+  /** Pole godziny z przyciskiem otwierającym zegar obok. */
+  const poleGodziny = (
+    etykieta: string,
+    wartosc: string,
+    ustaw: (v: string) => void,
+    placeholder: string,
+    ktore: 'od' | 'do'
+  ) => (
+    <View style={s.poleBlok}>
+      <Text style={s.etykieta}>{etykieta}</Text>
+      <View style={s.rzadZZegarem}>
+        <TextInput
+          style={[s.pole, s.poleWRzedzie]}
+          value={wartosc}
+          onChangeText={ustaw}
+          placeholder={placeholder}
+          placeholderTextColor={C.tekstPrzygaszony}
+          keyboardType="numbers-and-punctuation"
+          editable={!zapisuje}
+          autoCorrect={false}
+        />
+        <Pressable
+          style={s.przyciskZegara}
+          onPress={() => {
+            if (zapisuje) return;
+            setZegar(ktore);
+          }}
+        >
+          <Text style={s.przyciskZegaraTekst}>🕐</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
 
   const pole = (
     etykieta: string,
@@ -365,10 +424,10 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
 
           {rodzaj === 'zmiana' ? (
             <>
-              {pole('Wyjazd', od, setOd, '11:30', false)}
-              {pole('Zjazd', doGodz, setDoGodz, '21:15', false)}
+              {poleGodziny('Wyjazd', od, setOd, '11:30 albo 9', 'od')}
+              {poleGodziny('Zjazd', doGodz, setDoGodz, '21:15 albo 21', 'do')}
               <Text style={s.przypis}>
-                Wystarczy jedna godzina. Czas pracy policzy się, gdy będą obie.
+                Wystarczy jedna godzina. Samo „9" znaczy 9:00, „930" znaczy 9:30.
               </Text>
             </>
           ) : null}
@@ -380,6 +439,17 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
           ) : null}
 
           {blad ? <Text style={s.blad}>{blad}</Text> : null}
+
+          {nadpisanie !== null ? (
+            <View style={s.ostrzezenie}>
+              <Text style={s.ostrzezenieTekst}>
+                W tej sesji zapisałeś już: {nadpisanie}
+              </Text>
+              <Text style={s.ostrzezeniePodpowiedz}>
+                Serwer nadpisze tamtą wartość. Dotknij „Zapisz" ponownie, żeby potwierdzić.
+              </Text>
+            </View>
+          ) : null}
 
           <Pressable
             style={({ pressed }) => [s.zapisz, pressed && s.wcisniety, zapisuje && s.nieaktywny]}
@@ -396,9 +466,9 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
           {wSesji.length > 0 ? (
             <View style={s.sesja}>
               <Text style={s.sesjaNaglowek}>Zapisane w tej sesji ({wSesji.length})</Text>
-              {wSesji.map((opis, i) => (
-                <Text key={`${opis}-${i}`} style={s.sesjaPozycja}>
-                  • {opis}
+              {wSesji.map((w, i) => (
+                <Text key={`${w.rodzaj}-${i}`} style={s.sesjaPozycja}>
+                  • {w.opis}
                 </Text>
               ))}
             </View>
@@ -425,6 +495,18 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <WybierzGodzine
+        widoczny={zegar !== null}
+        tytul={zegar === 'od' ? 'Godzina wyjazdu' : 'Godzina zjazdu'}
+        wartosc={zegar === 'od' ? (normalizujGodzine(od) ?? '') : (normalizujGodzine(doGodz) ?? '')}
+        onWybierz={(g) => {
+          if (zegar === 'od') setOd(g);
+          else setDoGodz(g);
+          setZegar(null);
+        }}
+        onZamknij={() => setZegar(null)}
+      />
 
       {dzisiaj !== null ? (
         <WybierzDate
@@ -484,6 +566,31 @@ const s = StyleSheet.create({
   },
 
   przypis: { color: C.tekstPrzygaszony, fontSize: 12, marginTop: -6, marginBottom: 8 },
+
+  rzadZZegarem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  poleWRzedzie: { flex: 1 },
+  przyciskZegara: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: C.karta,
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  przyciskZegaraTekst: { fontSize: 22 },
+
+  ostrzezenie: {
+    backgroundColor: '#2a2416',
+    borderColor: C.ostrzezenie,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+  },
+  ostrzezenieTekst: { color: C.ostrzezenie, fontSize: 14, fontWeight: '700' },
+  ostrzezeniePodpowiedz: { color: C.tekstPrzygaszony, fontSize: 12, marginTop: 4 },
   blad: { color: C.blad, fontSize: 14, marginTop: 4, marginBottom: 8 },
 
   zapisz: {

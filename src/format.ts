@@ -91,3 +91,39 @@ export function poprawnaData(iso: string): boolean {
   if (!Number.isFinite(t)) return false;
   return new Date(t).toISOString().slice(0, 10) === iso;
 }
+
+/**
+ * Normalizacja godziny wpisanej z palca.
+ *
+ * `9` → `09:00`, `930` → `09:30`, `0930` → `09:30`, `9:30` → `09:30`.
+ * Zwraca `null`, gdy nie da się tego sensownie odczytać.
+ *
+ * Serwer przyjmuje wyłącznie `GG:MM` (`normalizeTime` w `utils/datetime.ts`),
+ * więc skróty rozwijamy TUTAJ. Kurier wpisujący „9" ma na myśli dziewiątą rano,
+ * a nie błąd walidacji.
+ */
+export function normalizujGodzine(tekst: string): string | null {
+  const t = tekst.trim().replace('.', ':').replace(',', ':');
+  if (t.length === 0) return null;
+
+  const zDwukropkiem = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (zDwukropkiem) {
+    const g = Number(zDwukropkiem[1]);
+    const m = Number(zDwukropkiem[2]);
+    return g <= 23 && m <= 59 ? `${String(g).padStart(2, '0')}:${String(m).padStart(2, '0')}` : null;
+  }
+
+  // Same cyfry: 1–2 znaki to pełna godzina, 3–4 to godzina z minutami.
+  const cyfry = /^(\d{1,4})$/.exec(t);
+  if (!cyfry?.[1]) return null;
+  const s = cyfry[1];
+
+  if (s.length <= 2) {
+    const g = Number(s);
+    return g <= 23 ? `${String(g).padStart(2, '0')}:00` : null;
+  }
+
+  const g = Number(s.slice(0, s.length - 2));
+  const m = Number(s.slice(-2));
+  return g <= 23 && m <= 59 ? `${String(g).padStart(2, '0')}:${String(m).padStart(2, '0')}` : null;
+}

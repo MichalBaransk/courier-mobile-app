@@ -26,48 +26,41 @@ import {
   nazwaMiesiaca,
   numerTygodniaISO,
   poniedzialek,
-  przyszloscZablokowana,
   zakresMiesiaca,
-  zakresTygodnia,
 } from './src/okresy';
 import { DodajWpis } from './src/DodajWpis';
 import { EkranTokena } from './src/EkranTokena';
-import {
-  KartaDnia,
-  KartaOkresu,
-  KartaSalda,
-  SzczegolyDnia,
-  SzczegolyTygodnia,
-} from './src/Karty';
-import { KalendarzMiesiaca, WykresTygodnia } from './src/Wykresy';
+import { KartaDnia, KartaOkresu, KartaSalda, SzczegolyTygodnia } from './src/Karty';
+import { KalendarzMiesiaca } from './src/Wykresy';
 import { C } from './src/theme';
 import type { DailySummary, DailyTotals, PeriodSummary, Saldo } from './src/types';
 
-type Widok = 'dzien' | 'tydzien' | 'miesiac';
 type Stan = 'wczytywanie' | 'brakTokena' | 'gotowe';
 
-const WIDOKI: Array<{ id: Widok; etykieta: string }> = [
-  { id: 'dzien', etykieta: 'Dzień' },
-  { id: 'tydzien', etykieta: 'Tydzień' },
-  { id: 'miesiac', etykieta: 'Miesiąc' },
-];
-
+/**
+ * JEDEN EKRAN zamiast trzech zakładek.
+ *
+ * Kalendarz jest nawigacją: dotknięcie dnia pokazuje pełną kartę tego dnia,
+ * dotknięcie numeru tygodnia po lewej — podsumowanie tygodnia, brak zaznaczenia
+ * — podsumowanie miesiąca. Strzałki u góry przesuwają miesiąc.
+ *
+ * Poprzedni podział na zakładki Dzień/Tydzień/Miesiąc wymagał trzymania w głowie,
+ * w której się jest, i skakania między nimi, żeby porównać dwa dni.
+ */
 export default function App() {
   const [stan, setStan] = useState<Stan>('wczytywanie');
   const [token, setToken] = useState<string | null>(null);
 
-  /**
-   * Dzisiejsza data WEDŁUG SERWERA. Ustawiana przy pierwszym pobraniu i od tego
-   * momentu jedyny punkt odniesienia dla nawigacji. Zegar telefonu nie bierze
-   * udziału w niczym — doba kończy się o północy w Europe/Warsaw (§8a).
-   */
+  /** Dzisiejsza data WEDŁUG SERWERA — jedyny punkt odniesienia (§8a). */
   const [dzisiaj, setDzisiaj] = useState<string | null>(null);
-  /** Dzień, na którym stoi nawigacja. */
-  const [kursor, setKursor] = useState<string | null>(null);
-  const [widok, setWidok] = useState<Widok>('dzien');
+  /** Dowolny dzień oglądanego miesiąca — wyznacza zakres kalendarza. */
+  const [miesiac, setMiesiac] = useState<string | null>(null);
+
+  const [wybranyDzien, setWybranyDzien] = useState<string | null>(null);
+  const [wybranyTydzien, setWybranyTydzien] = useState<string | null>(null);
 
   const [dzien, setDzien] = useState<DailySummary | null>(null);
-  const [dniOkresu, setDniOkresu] = useState<DailyTotals[]>([]);
+  const [dniMiesiaca, setDniMiesiaca] = useState<DailyTotals[]>([]);
   const [okres, setOkres] = useState<PeriodSummary | null>(null);
   const [saldo, setSaldo] = useState<Saldo | null>(null);
 
@@ -76,14 +69,6 @@ export default function App() {
   const [odswiezam, setOdswiezam] = useState(false);
   const [dodawanie, setDodawanie] = useState(false);
   const [potwierdzenie, setPotwierdzenie] = useState<string | null>(null);
-
-  /**
-   * Zaznaczenie WEWNĄTRZ widoku okresowego — filtruje w miejscu, bez skakania
-   * do zakładki dnia. Przeskok był najbardziej uciążliwą rzeczą w poprzedniej
-   * wersji: żeby obejrzeć trzy dni tygodnia, trzeba było trzy razy wracać.
-   */
-  const [wybranyDzien, setWybranyDzien] = useState<string | null>(null);
-  const [wybranyTydzien, setWybranyTydzien] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -99,8 +84,6 @@ export default function App() {
 
   const obsluzBlad = useCallback(async (err: unknown) => {
     if (err instanceof ApiError && err.isUnauthorized) {
-      // Token przestał działać (np. wymieniony na serwerze) — kasujemy go
-      // i wracamy do ekranu wpisywania zamiast pokazywać wieczny błąd.
       await clearToken();
       setToken(null);
       setStan('brakTokena');
@@ -109,62 +92,65 @@ export default function App() {
     setBlad(err instanceof ApiError ? err.message : 'Coś poszło nie tak.');
   }, []);
 
-  const pobierz = useCallback(
-    async (t: string, doWidoku: Widok, naDzien: string | null) => {
-      setBlad(null);
+  /** Start: serwer podaje dzisiejszą datę, ona ustawia miesiąc i zaznaczenie. */
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token || dzisiaj !== null) return;
+    void (async () => {
       setLaduje(true);
       try {
-        if (doWidoku === 'dzien') {
-          const dane = naDzien === null ? await getToday(t) : await getDzien(t, naDzien);
-          setDzien(dane);
-          setKursor(dane.date);
-          setDzisiaj((poprzednie) => poprzednie ?? dane.date);
-          return;
-        }
-
-        // Widoki okresowe potrzebują punktu odniesienia; przy pierwszym wejściu
-        // bierzemy go z serwera, żeby nie zgadywać dnia z zegara telefonu.
-        const kotwica = naDzien ?? dzisiaj ?? (await getToday(t)).date;
-        const zakres = doWidoku === 'tydzien' ? zakresTygodnia(kotwica) : zakresMiesiaca(kotwica);
-
-        const [dni, podsumowanie] = await Promise.all([
-          getDni(t, zakres.od, zakres.do),
-          getOkres(t, zakres.od, zakres.do),
-        ]);
-        setDniOkresu(dni);
-        setOkres(podsumowanie);
-        setKursor(kotwica);
-        setDzisiaj((poprzednie) => poprzednie ?? kotwica);
+        const dane = await getToday(token);
+        setDzien(dane);
+        setDzisiaj(dane.date);
+        setMiesiac(dane.date);
+        setWybranyDzien(dane.date);
       } catch (err) {
         await obsluzBlad(err);
       } finally {
         setLaduje(false);
       }
+    })();
+  }, [stan, token, dzisiaj, obsluzBlad]);
+
+  const pobierzMiesiac = useCallback(
+    async (t: string, wMiesiacu: string) => {
+      const zakres = zakresMiesiaca(wMiesiacu);
+      const [dni, podsumowanie] = await Promise.all([
+        getDni(t, zakres.od, zakres.do),
+        getOkres(t, zakres.od, zakres.do),
+      ]);
+      setDniMiesiaca(dni);
+      setOkres(podsumowanie);
     },
-    [dzisiaj, obsluzBlad]
+    []
   );
 
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token || miesiac === null) return;
+    setLaduje(true);
+    pobierzMiesiac(token, miesiac)
+      .catch(obsluzBlad)
+      .finally(() => setLaduje(false));
+  }, [stan, token, miesiac, pobierzMiesiac, obsluzBlad]);
+
   /**
-   * JEDNO miejsce, w którym cokolwiek się pobiera.
+   * Pełna karta dnia pobierana osobno.
    *
-   * Nawigacja wyłącznie ustawia stan (`kursor`, `widok`) — nigdy nie woła
-   * pobierania sama. Poprzednia wersja robiła oba naraz i przy dotknięciu dnia
-   * w kalendarzu powstawał wyścig: efekt startował ze STARYM kursorem, czyli
-   * kotwicą miesiąca, i nadpisywał wynik kliknięcia. Stąd „wybieranie z
-   * kalendarza nie działa".
+   * `/api/v1/dni` niesie tylko sumy pod wykres — nie ma tam godzin zmiany,
+   * wypłat z portfela, litrów ani ceny za litr. Skoro dzień ma być pokazany
+   * w komplecie, trzeba po niego sięgnąć.
    */
   useEffect(() => {
-    if (stan !== 'gotowe' || !token || kursor === null) return;
-    void pobierz(token, widok, kursor);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stan, token, widok, kursor]);
-
-  /** Pierwsze pobranie: serwer podaje dzisiejszą datę i ona staje się kursorem. */
-  useEffect(() => {
-    if (stan !== 'gotowe' || !token || kursor !== null) return;
-    void pobierz(token, 'dzien', null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stan, token]);
+    if (stan !== 'gotowe' || !token || wybranyDzien === null) return;
+    let aktualne = true;
+    getDzien(token, wybranyDzien)
+      .then((d) => {
+        if (aktualne) setDzien(d);
+      })
+      .catch(obsluzBlad);
+    return () => {
+      aktualne = false;
+    };
+  }, [stan, token, wybranyDzien, obsluzBlad]);
 
   useEffect(() => {
     if (stan !== 'gotowe' || !token) return;
@@ -173,61 +159,54 @@ export default function App() {
       .catch(() => setSaldo(null));
   }, [stan, token]);
 
-  const przesun = useCallback(
+  const przesunMiesiac = useCallback(
     (kierunek: -1 | 1) => {
-      if (!token || !kursor) return;
-
-      const nowy =
-        widok === 'dzien'
-          ? przesunDate(kursor, kierunek)
-          : widok === 'tydzien'
-            ? przesunDate(kursor, kierunek * 7)
-            : // Miesiąc: przez pierwszy dzień bieżącego miesiąca, żeby przeskok
-              // 31 → 30 dni nie gubił lutego ani nie przeskakiwał o dwa.
-              przesunDate(zakresMiesiaca(kursor).od, kierunek === 1 ? 32 : -1);
-
+      if (miesiac === null) return;
       setPotwierdzenie(null);
-      setKursor(nowy);
+      setWybranyDzien(null);
+      setWybranyTydzien(null);
+      setMiesiac(przesunDate(zakresMiesiaca(miesiac).od, kierunek === 1 ? 32 : -1));
     },
-    [token, kursor, widok]
+    [miesiac]
   );
 
   const odswiez = useCallback(async () => {
-    if (!token) return;
+    if (!token || miesiac === null) return;
     setOdswiezam(true);
-    await pobierz(token, widok, kursor);
-    setOdswiezam(false);
-  }, [token, widok, kursor, pobierz]);
+    try {
+      await pobierzMiesiac(token, miesiac);
+      if (wybranyDzien !== null) setDzien(await getDzien(token, wybranyDzien));
+      setSaldo(await getSaldo(token));
+    } catch (err) {
+      await obsluzBlad(err);
+    } finally {
+      setOdswiezam(false);
+    }
+  }, [token, miesiac, wybranyDzien, pobierzMiesiac, obsluzBlad]);
 
   const rozlacz = useCallback(async () => {
     await clearToken();
     setToken(null);
-    setDzien(null);
     setDzisiaj(null);
-    setKursor(null);
+    setMiesiac(null);
+    setWybranyDzien(null);
+    setWybranyTydzien(null);
+    setDzien(null);
     setBlad(null);
     setStan('brakTokena');
   }, []);
 
-  /** Dotknięcie dnia zaznacza go W MIEJSCU. Drugie dotknięcie odznacza. */
   const zaznaczDzien = useCallback((data: string) => {
     setPotwierdzenie(null);
     setWybranyTydzien(null);
     setWybranyDzien((poprzedni) => (poprzedni === data ? null : data));
   }, []);
 
-  /** Dotknięcie numeru tygodnia w kalendarzu — podsumowanie całego tygodnia. */
   const zaznaczTydzien = useCallback((pn: string) => {
     setPotwierdzenie(null);
     setWybranyDzien(null);
     setWybranyTydzien((poprzedni) => (poprzedni === pn ? null : pn));
   }, []);
-
-  /** Zmiana okresu albo zakładki unieważnia zaznaczenie. */
-  useEffect(() => {
-    setWybranyDzien(null);
-    setWybranyTydzien(null);
-  }, [widok, kursor]);
 
   if (stan === 'wczytywanie') {
     return (
@@ -252,63 +231,32 @@ export default function App() {
     );
   }
 
-  const tydzien = kursor === null ? null : zakresTygodnia(kursor);
-  const naglowek =
-    kursor === null
-      ? '…'
-      : widok === 'dzien'
-        ? dataPoPolsku(kursor)
-        : widok === 'tydzien'
-          ? `Tydzień ${numerTygodniaISO(kursor)} · ${etykietaTygodnia(kursor)}`
-          : nazwaMiesiaca(kursor);
-
-  // Blokada dotyczy KAŻDEGO widoku — przyszły tydzień i miesiąc są równie puste
-  // jak przyszły dzień.
-  const wPrzodZablokowane =
-    kursor !== null && dzisiaj !== null && przyszloscZablokowana(widok, kursor, dzisiaj);
+  const wPrzodZablokowany =
+    miesiac !== null && dzisiaj !== null && zakresMiesiaca(miesiac).od >= zakresMiesiaca(dzisiaj).od;
 
   return (
     <View style={s.tlo}>
       <StatusBar style="light" />
 
       <View style={s.gora}>
-        <View style={s.zakladki}>
-          {WIDOKI.map((w) => (
-            <Pressable
-              key={w.id}
-              style={[s.zakladka, widok === w.id && s.zakladkaAktywna]}
-              onPress={() => {
-                setPotwierdzenie(null);
-                setWidok(w.id);
-              }}
-            >
-              <Text style={[s.zakladkaTekst, widok === w.id && s.zakladkaTekstAktywny]}>
-                {w.etykieta}
-              </Text>
-            </Pressable>
-          ))}
+        <Pressable style={s.strzalka} onPress={() => przesunMiesiac(-1)}>
+          <Text style={s.strzalkaTekst}>‹</Text>
+        </Pressable>
+
+        <View style={s.naglowekBlok}>
+          <Text style={s.naglowekTekst} numberOfLines={1}>
+            {miesiac === null ? '…' : nazwaMiesiaca(miesiac)}
+          </Text>
+          {laduje ? <ActivityIndicator size="small" color={C.tekstPrzygaszony} /> : null}
         </View>
 
-        <View style={s.nawigacja}>
-          <Pressable style={s.strzalka} onPress={() => przesun(-1)}>
-            <Text style={s.strzalkaTekst}>‹</Text>
-          </Pressable>
-
-          <View style={s.naglowekBlok}>
-            <Text style={s.naglowekTekst} numberOfLines={1}>
-              {naglowek}
-            </Text>
-            {laduje ? <ActivityIndicator size="small" color={C.tekstPrzygaszony} /> : null}
-          </View>
-
-          <Pressable
-            style={[s.strzalka, wPrzodZablokowane && s.strzalkaNieaktywna]}
-            onPress={() => przesun(1)}
-            disabled={wPrzodZablokowane}
-          >
-            <Text style={s.strzalkaTekst}>›</Text>
-          </Pressable>
-        </View>
+        <Pressable
+          style={[s.strzalka, wPrzodZablokowany && s.strzalkaNieaktywna]}
+          onPress={() => przesunMiesiac(1)}
+          disabled={wPrzodZablokowany}
+        >
+          <Text style={s.strzalkaTekst}>›</Text>
+        </Pressable>
       </View>
 
       <ScrollView
@@ -330,9 +278,17 @@ export default function App() {
           </View>
         ) : null}
 
-        {/* Dodawanie dostępne z każdego widoku — wpis i tak trafia na dzień
-            wybrany w samym formularzu, więc blokowanie go w tygodniu było
-            ograniczeniem bez powodu. */}
+        {miesiac !== null ? (
+          <KalendarzMiesiaca
+            zakres={zakresMiesiaca(miesiac)}
+            dni={dniMiesiaca}
+            wybrany={wybranyDzien}
+            wybranyTydzien={wybranyTydzien}
+            onWybierz={zaznaczDzien}
+            onWybierzTydzien={zaznaczTydzien}
+          />
+        ) : null}
+
         <Pressable
           style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
           onPress={() => {
@@ -343,60 +299,31 @@ export default function App() {
           <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
         </Pressable>
 
-        {widok === 'dzien' ? (
+        {wybranyDzien !== null && dzien !== null && dzien.date === wybranyDzien ? (
           <>
-            {dzien ? <KartaDnia dane={dzien} /> : null}
-            {saldo ? <KartaSalda saldo={saldo} /> : null}
+            <View style={s.naglowekWyboru}>
+              <Text style={s.naglowekWyboruTekst}>{dataPoPolsku(wybranyDzien)}</Text>
+              <Pressable onPress={() => setWybranyDzien(null)}>
+                <Text style={s.zamknijWybor}>✕</Text>
+              </Pressable>
+            </View>
+            <KartaDnia dane={dzien} />
           </>
         ) : null}
 
-        {widok === 'tydzien' && tydzien ? (
-          <WykresTygodnia
-            zakres={tydzien}
-            dni={dniOkresu}
-            wybrany={wybranyDzien}
-            onWybierz={zaznaczDzien}
-          />
-        ) : null}
-
-        {widok === 'miesiac' && kursor ? (
-          <KalendarzMiesiaca
-            zakres={zakresMiesiaca(kursor)}
-            dni={dniOkresu}
-            wybrany={wybranyDzien}
-            wybranyTydzien={wybranyTydzien}
-            onWybierz={zaznaczDzien}
-            onWybierzTydzien={zaznaczTydzien}
-          />
-        ) : null}
-
-        {widok !== 'dzien' && wybranyDzien !== null ? (
-          <SzczegolyDnia
-            data={wybranyDzien}
-            dzien={dniOkresu.find((d) => d.date === wybranyDzien) ?? null}
-            onZamknij={() => setWybranyDzien(null)}
-          />
-        ) : null}
-
-        {widok === 'miesiac' && wybranyTydzien !== null ? (
+        {wybranyTydzien !== null ? (
           <SzczegolyTygodnia
             etykieta={`TYDZIEŃ ${numerTygodniaISO(wybranyTydzien)} · ${etykietaTygodnia(wybranyTydzien)}`}
-            dni={dniOkresu.filter((d) => poniedzialek(d.date) === wybranyTydzien)}
+            dni={dniMiesiaca.filter((d) => poniedzialek(d.date) === wybranyTydzien)}
             onZamknij={() => setWybranyTydzien(null)}
           />
         ) : null}
 
-        {/* Podsumowanie całego okresu chowamy, gdy coś jest zaznaczone —
-            dwie karty z liczbami obok siebie tylko mylą. */}
-        {widok !== 'dzien' && okres && wybranyDzien === null && wybranyTydzien === null ? (
+        {wybranyDzien === null && wybranyTydzien === null && okres ? (
           <KartaOkresu dane={okres} />
         ) : null}
 
-        {!blad && laduje && !dzien && widok === 'dzien' ? (
-          <View style={s.srodek}>
-            <ActivityIndicator size="large" color={C.akcent} />
-          </View>
-        ) : null}
+        {saldo ? <KartaSalda saldo={saldo} /> : null}
 
         <Pressable style={s.linkTekstowy} onPress={rozlacz}>
           <Text style={s.linkTekstowyTekst}>Zmień token</Text>
@@ -410,16 +337,13 @@ export default function App() {
           dzisiaj={dzisiaj}
           onZamknij={() => setDodawanie(false)}
           onZapisano={(wynik: ZapisOdpowiedz) => {
-            // Serwer odesłał świeży stan dnia razem z potwierdzeniem zapisu,
-            // więc przeskakujemy na ten dzień bez dodatkowego zapytania.
-            // Modal zostaje otwarty — zamyka go dopiero „Gotowe". Tu tylko
-            // odświeżamy to, co widać pod spodem, bez zmiany zakładki.
+            // Modal zostaje otwarty — zamyka go dopiero „Gotowe".
             setDzien(wynik.dzien);
+            setWybranyDzien(wynik.dzien.date);
+            setWybranyTydzien(null);
             setBlad(null);
             setPotwierdzenie(wynik.ostrzezenie ?? 'Zapisano.');
-            if (widok !== 'dzien' && kursor !== null && token !== null) {
-              void pobierz(token, widok, kursor);
-            }
+            if (miesiac !== null) void pobierzMiesiac(token, miesiac).catch(() => {});
             getSaldo(token)
               .then(setSaldo)
               .catch(() => {});
@@ -435,22 +359,13 @@ const s = StyleSheet.create({
   srodek: { justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
   zawartosc: { padding: 16, paddingBottom: 40 },
 
-  gora: { paddingTop: 52, paddingHorizontal: 16, paddingBottom: 8 },
-
-  zakladki: {
+  gora: {
     flexDirection: 'row',
-    backgroundColor: C.karta,
-    borderRadius: 12,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: C.obramowanie,
+    alignItems: 'center',
+    paddingTop: 52,
+    paddingHorizontal: 16,
+    paddingBottom: 6,
   },
-  zakladka: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center' },
-  zakladkaAktywna: { backgroundColor: C.akcent },
-  zakladkaTekst: { color: C.tekstPrzygaszony, fontSize: 14, fontWeight: '600' },
-  zakladkaTekstAktywny: { color: C.tlo, fontWeight: '700' },
-
-  nawigacja: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
   strzalka: { paddingHorizontal: 14, paddingVertical: 4 },
   strzalkaNieaktywna: { opacity: 0.25 },
   strzalkaTekst: { color: C.tekst, fontSize: 30, lineHeight: 34 },
@@ -461,14 +376,35 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  naglowekTekst: { color: C.tekst, fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  naglowekTekst: {
+    color: C.tekst,
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+    textTransform: 'capitalize',
+  },
+
+  naglowekWyboru: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  naglowekWyboruTekst: {
+    color: C.tekst,
+    fontSize: 15,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+  },
+  zamknijWybor: { color: C.tekstPrzygaszony, fontSize: 18, paddingHorizontal: 6 },
 
   dodaj: {
     backgroundColor: C.akcent,
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   wcisniety: { opacity: 0.75 },
   dodajTekst: { color: C.tlo, fontSize: 16, fontWeight: '700' },
