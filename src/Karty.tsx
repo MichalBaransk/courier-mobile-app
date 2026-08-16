@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { dataPoPolsku, godziny, km, litry, zl, zlZeZnakiem } from './format';
+import { iloraz } from './licz';
 import { C } from './theme';
 import type { DailySummary, DailyTotals, PeriodSummary, Saldo } from './types';
 
@@ -235,10 +236,10 @@ export function KartaOkresu({ dane }: { dane: PeriodSummary }) {
           etykieta="Średnia cena"
           wartosc={dane.avgPricePerLiter != null ? `${zl(dane.avgPricePerLiter)}/L` : '—'}
         />
-        {dane.totalDistanceKm > 0 && dane.totalFuelCost > 0 ? (
+        {dane.totalFuelCost > 0 && iloraz(dane.totalFuelCost, dane.totalDistanceKm) !== null ? (
           <Wiersz
             etykieta="Koszt na kilometr"
-            wartosc={`${zl(dane.totalFuelCost / dane.totalDistanceKm)}/km`}
+            wartosc={`${zl(iloraz(dane.totalFuelCost, dane.totalDistanceKm))}/km`}
           />
         ) : null}
       </Sekcja>

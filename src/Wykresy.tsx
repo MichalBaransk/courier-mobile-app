@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { zl } from './format';
+import { procentUdzialu, skonczona } from './licz';
 import { dniZakresu, dzienTygodnia, numerTygodniaISO, poniedzialek, type Zakres } from './okresy';
 import { C } from './theme';
 import type { DailyTotals } from './types';
@@ -22,6 +23,18 @@ function poDacie(dni: DailyTotals[]): Map<string, DailyTotals> {
   return new Map(dni.map((d) => [d.date, d]));
 }
 
+/**
+ * Netto dnia sprowadzone do liczby nadającej się do rysowania.
+ *
+ * Jeden `NaN` w danych zatruwa `Math.max` (wynik `NaN`), a stamtąd całą skalę
+ * wykresu: każdy słupek dostaje wysokość `NaN` i znika. Zamiana na 0 kosztuje
+ * jeden słupek, a nie cały wykres.
+ */
+function doWykresu(wpis: DailyTotals | undefined): number {
+  const v = skonczona(wpis?.totalNetto);
+  return v !== null && v > 0 ? v : 0;
+}
+
 /* ========================================================================== */
 /*  Słupki tygodnia                                                           */
 /* ========================================================================== */
@@ -39,7 +52,7 @@ export function WykresTygodnia({
 }) {
   const mapa = poDacie(dni);
   const daty = dniZakresu(zakres);
-  const maks = Math.max(...daty.map((d) => mapa.get(d)?.totalNetto ?? 0), 1);
+  const maks = Math.max(...daty.map((d) => doWykresu(mapa.get(d))), 1);
 
   return (
     <View style={s.karta}>
@@ -47,9 +60,8 @@ export function WykresTygodnia({
 
       <View style={s.slupki}>
         {daty.map((data, i) => {
-          const wpis = mapa.get(data);
-          const netto = wpis?.totalNetto ?? 0;
-          const wysokosc = netto > 0 ? Math.max(4, Math.round((netto / maks) * 110)) : 2;
+          const netto = doWykresu(mapa.get(data));
+          const wysokosc = netto > 0 ? Math.max(4, Math.round((procentUdzialu(netto, maks) / 100) * 110)) : 2;
           const aktywny = wybrany === data;
 
           return (
@@ -96,7 +108,7 @@ export function KalendarzMiesiaca({
 }) {
   const mapa = poDacie(dni);
   const daty = dniZakresu(zakres);
-  const maks = Math.max(...daty.map((d) => mapa.get(d)?.totalNetto ?? 0), 1);
+  const maks = Math.max(...daty.map((d) => doWykresu(mapa.get(d))), 1);
 
   // Puste pola przed pierwszym dniem, żeby 1. wypadł we właściwej kolumnie.
   const przesuniecie = dzienTygodnia(zakres.od) - 1;
@@ -139,8 +151,8 @@ export function KalendarzMiesiaca({
               {tydzien.map((data, i) => {
                 if (data === null) return <View key={`pusto-${pn}-${i}`} style={s.komorka} />;
 
-                const netto = mapa.get(data)?.totalNetto ?? 0;
-                const intensywnosc = netto > 0 ? 0.18 + 0.82 * (netto / maks) : 0;
+                const netto = doWykresu(mapa.get(data));
+                const intensywnosc = netto > 0 ? 0.18 + 0.82 * (procentUdzialu(netto, maks) / 100) : 0;
 
                 return (
                   <Pressable

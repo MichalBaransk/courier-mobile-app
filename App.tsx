@@ -39,6 +39,7 @@ import { KartaCelu, UstawCel } from './src/Cele';
 import { KartaOfert } from './src/Oferty';
 import { KartaAnalizyDnia, PorownanieOkresow } from './src/Analiza';
 import { UsunWpisy } from './src/UsunWpisy';
+import { PasekSekcji, type Sekcja } from './src/Nawigacja';
 import { KalendarzMiesiaca } from './src/Wykresy';
 import { C } from './src/theme';
 import type {
@@ -95,6 +96,15 @@ export default function App() {
   const [dodawanie, setDodawanie] = useState(false);
   const [kasowanie, setKasowanie] = useState(false);
   const [potwierdzenie, setPotwierdzenie] = useState<string | null>(null);
+  /**
+   * Która sekcja jest na wierzchu.
+   *
+   * Stan danych jest WSPÓLNY dla wszystkich trzech — przełączenie zakładki nic
+   * nie pobiera na nowo i nie gubi zaznaczenia w kalendarzu. To celowe: dzień
+   * wybrany w kalendarzu filtruje też listę ofert, więc obie sekcje mówią
+   * o tym samym.
+   */
+  const [sekcja, setSekcja] = useState<Sekcja>('kalendarz');
   /** Który cel jest właśnie ustawiany; `null` = modal zamknięty. */
   const [celDoUstawienia, setCelDoUstawienia] = useState<'MONTHLY' | 'WEEKLY' | null>(null);
   const [kwotaCelu, setKwotaCelu] = useState<number | null>(null);
@@ -344,16 +354,6 @@ export default function App() {
   const wPrzodZablokowany =
     miesiac !== null && dzisiaj !== null && zakresMiesiaca(miesiac).od >= zakresMiesiaca(dzisiaj).od;
 
-  /**
-   * Cele pokazujemy tylko przy oglądaniu BIEŻĄCEGO miesiąca.
-   *
-   * Serwer liczy postęp wyłącznie dla dzisiejszego okresu, więc przy marcu
-   * pasek pokazywałby sierpniowe liczby pod marcowym nagłówkiem. Lepiej nie
-   * pokazać nic, niż pokazać liczbę, która znaczy co innego, niż się wydaje.
-   */
-  const biezacyMiesiac =
-    miesiac !== null && dzisiaj !== null && zakresMiesiaca(miesiac).od === zakresMiesiaca(dzisiaj).od;
-
   /** Zakres, z którego pokazujemy oferty — idzie za zaznaczeniem w kalendarzu. */
   const ofertyWidoku =
     wybranyDzien !== null
@@ -369,6 +369,14 @@ export default function App() {
         ? `OFERTY — TYDZIEŃ ${numerTygodniaISO(wybranyTydzien)}`
         : 'OFERTY MIESIĄCA';
 
+  /** Opis zawężenia listy ofert; `null` = cały miesiąc. */
+  const zawezenie =
+    wybranyDzien !== null
+      ? dataPoPolsku(wybranyDzien)
+      : wybranyTydzien !== null
+        ? `tydzień ${numerTygodniaISO(wybranyTydzien)} · ${etykietaTygodnia(wybranyTydzien)}`
+        : null;
+
   /** Dzień, którego dotyczy kasowanie: zaznaczony albo dzisiejszy. */
   const dzienDoKasowania = wybranyDzien ?? dzisiaj;
 
@@ -376,26 +384,36 @@ export default function App() {
     <View style={s.tlo}>
       <StatusBar style="light" />
 
-      <View style={s.gora}>
-        <Pressable style={s.strzalka} onPress={() => przesunMiesiac(-1)}>
-          <Text style={s.strzalkaTekst}>‹</Text>
-        </Pressable>
-
-        <View style={s.naglowekBlok}>
-          <Text style={s.naglowekTekst} numberOfLines={1}>
-            {miesiac === null ? '…' : nazwaMiesiaca(miesiac)}
-          </Text>
-          {laduje ? <ActivityIndicator size="small" color={C.tekstPrzygaszony} /> : null}
+      {sekcja === 'cele' ? (
+        <View style={s.gora}>
+          <View style={s.naglowekBlok}>
+            <Text style={s.naglowekTekst} numberOfLines={1}>
+              Cele i portfel
+            </Text>
+          </View>
         </View>
+      ) : (
+        <View style={s.gora}>
+          <Pressable style={s.strzalka} onPress={() => przesunMiesiac(-1)}>
+            <Text style={s.strzalkaTekst}>‹</Text>
+          </Pressable>
 
-        <Pressable
-          style={[s.strzalka, wPrzodZablokowany && s.strzalkaNieaktywna]}
-          onPress={() => przesunMiesiac(1)}
-          disabled={wPrzodZablokowany}
-        >
-          <Text style={s.strzalkaTekst}>›</Text>
-        </Pressable>
-      </View>
+          <View style={s.naglowekBlok}>
+            <Text style={s.naglowekTekst} numberOfLines={1}>
+              {miesiac === null ? '…' : nazwaMiesiaca(miesiac)}
+            </Text>
+            {laduje ? <ActivityIndicator size="small" color={C.tekstPrzygaszony} /> : null}
+          </View>
+
+          <Pressable
+            style={[s.strzalka, wPrzodZablokowany && s.strzalkaNieaktywna]}
+            onPress={() => przesunMiesiac(1)}
+            disabled={wPrzodZablokowany}
+          >
+            <Text style={s.strzalkaTekst}>›</Text>
+          </Pressable>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={s.zawartosc}
@@ -416,86 +434,113 @@ export default function App() {
           </View>
         ) : null}
 
-        {miesiac !== null ? (
-          <KalendarzMiesiaca
-            zakres={zakresMiesiaca(miesiac)}
-            dni={dniMiesiaca}
-            wybrany={wybranyDzien}
-            wybranyTydzien={wybranyTydzien}
-            onWybierz={zaznaczDzien}
-            onWybierzTydzien={zaznaczTydzien}
-          />
-        ) : null}
-
-        <View style={s.przyciski}>
-          <Pressable
-            style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
-            onPress={() => {
-              setPotwierdzenie(null);
-              setDodawanie(true);
-            }}
-          >
-            <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [s.usun, pressed && s.wcisniety]}
-            onPress={() => {
-              setPotwierdzenie(null);
-              setKasowanie(true);
-            }}
-          >
-            <Text style={s.usunTekst}>Usuń</Text>
-          </Pressable>
-        </View>
-
-        {wybranyDzien !== null && dzien !== null && dzien.date === wybranyDzien ? (
+        {/* ================= KALENDARZ: wpisy, dzień, tydzień, miesiąc ============ */}
+        {sekcja === 'kalendarz' ? (
           <>
-            <View style={s.naglowekWyboru}>
-              <Text style={s.naglowekWyboruTekst}>{dataPoPolsku(wybranyDzien)}</Text>
-              <Pressable onPress={() => setWybranyDzien(null)}>
-                <Text style={s.zamknijWybor}>✕</Text>
+            {miesiac !== null ? (
+              <KalendarzMiesiaca
+                zakres={zakresMiesiaca(miesiac)}
+                dni={dniMiesiaca}
+                wybrany={wybranyDzien}
+                wybranyTydzien={wybranyTydzien}
+                onWybierz={zaznaczDzien}
+                onWybierzTydzien={zaznaczTydzien}
+              />
+            ) : null}
+
+            <View style={s.przyciski}>
+              <Pressable
+                style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
+                onPress={() => {
+                  setPotwierdzenie(null);
+                  setDodawanie(true);
+                }}
+              >
+                <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [s.usun, pressed && s.wcisniety]}
+                onPress={() => {
+                  setPotwierdzenie(null);
+                  setKasowanie(true);
+                }}
+              >
+                <Text style={s.usunTekst}>Usuń</Text>
               </Pressable>
             </View>
-            <KartaDnia dane={dzien} />
-            <KartaAnalizyDnia dzien={dzien} odniesienie={odniesienie} />
-          </>
-        ) : null}
 
-        {wybranyTydzien !== null ? (
-          <SzczegolyTygodnia
-            etykieta={`TYDZIEŃ ${numerTygodniaISO(wybranyTydzien)} · ${etykietaTygodnia(wybranyTydzien)}`}
-            dni={dniMiesiaca.filter((d) => poniedzialek(d.date) === wybranyTydzien)}
-            onZamknij={() => setWybranyTydzien(null)}
-          />
-        ) : null}
+            {wybranyDzien !== null && dzien !== null && dzien.date === wybranyDzien ? (
+              <>
+                <View style={s.naglowekWyboru}>
+                  <Text style={s.naglowekWyboruTekst}>{dataPoPolsku(wybranyDzien)}</Text>
+                  <Pressable onPress={() => setWybranyDzien(null)}>
+                    <Text style={s.zamknijWybor}>✕</Text>
+                  </Pressable>
+                </View>
+                <KartaDnia dane={dzien} />
+                <KartaAnalizyDnia dzien={dzien} odniesienie={odniesienie} />
+              </>
+            ) : null}
 
-        {wybranyDzien === null && wybranyTydzien === null && okres ? (
-          <>
-            <KartaOkresu dane={okres} />
-            {miesiac !== null ? (
-              <PorownanieOkresow
-                biezacy={okres}
-                poprzedni={okresPoprzedni}
-                etykietaBiezacy={nazwaMiesiaca(miesiac)}
-                etykietaPoprzedni={nazwaMiesiaca(przesunDate(zakresMiesiaca(miesiac).od, -1))}
+            {wybranyTydzien !== null ? (
+              <SzczegolyTygodnia
+                etykieta={`TYDZIEŃ ${numerTygodniaISO(wybranyTydzien)} · ${etykietaTygodnia(wybranyTydzien)}`}
+                dni={dniMiesiaca.filter((d) => poniedzialek(d.date) === wybranyTydzien)}
+                onZamknij={() => setWybranyTydzien(null)}
               />
+            ) : null}
+
+            {wybranyDzien === null && wybranyTydzien === null && okres ? (
+              <>
+                <KartaOkresu dane={okres} />
+                {miesiac !== null ? (
+                  <PorownanieOkresow
+                    biezacy={okres}
+                    poprzedni={okresPoprzedni}
+                    etykietaBiezacy={nazwaMiesiaca(miesiac)}
+                    etykietaPoprzedni={nazwaMiesiaca(przesunDate(zakresMiesiaca(miesiac).od, -1))}
+                  />
+                ) : null}
+              </>
             ) : null}
           </>
         ) : null}
 
-        {/* Karta ofert znika, gdy w CAŁYM miesiącu nie ma ani jednej oceny —
-            pusta ramka na każdym ekranie byłaby tylko szumem. Przy dniu bez
-            ofert, ale w miesiącu, który je ma, zostaje i mówi „brak". */}
-        {oferty.length > 0 ? (
-          <KartaOfert
-            oferty={ofertyWidoku}
-            etykieta={etykietaOfert}
-            minStawka={info?.minStawkaNettoKm ?? null}
-          />
+        {/* ================= OFERTY ============================================== */}
+        {sekcja === 'oferty' ? (
+          <>
+            {zawezenie !== null ? (
+              <View style={s.filtr}>
+                <Text style={s.filtrTekst} numberOfLines={1}>
+                  Zawężone do: {zawezenie}
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    setWybranyDzien(null);
+                    setWybranyTydzien(null);
+                  }}
+                >
+                  <Text style={s.filtrLink}>Cały miesiąc</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            <KartaOfert
+              oferty={ofertyWidoku}
+              etykieta={etykietaOfert}
+              minStawka={info?.minStawkaNettoKm ?? null}
+            />
+
+            <Text style={s.podpowiedz}>
+              Zaznaczenie dnia albo tygodnia w kalendarzu zawęża też tę listę. Strzałki u góry
+              przesuwają miesiąc.
+            </Text>
+          </>
         ) : null}
 
-        {biezacyMiesiac ? (
+        {/* ================= CELE I PORTFEL ====================================== */}
+        {sekcja === 'cele' ? (
           <>
             <KartaCelu
               postep={cele?.miesiac ?? null}
@@ -515,15 +560,28 @@ export default function App() {
                 setCelDoUstawienia(o);
               }}
             />
+
+            {saldo ? <KartaSalda saldo={saldo} /> : null}
+
+            <Text style={s.podpowiedz}>
+              Postęp celu serwer liczy zawsze dla BIEŻĄCEGO okresu — przewijanie kalendarza
+              do innego miesiąca go nie zmienia.
+            </Text>
+
+            <Pressable style={s.linkTekstowy} onPress={rozlacz}>
+              <Text style={s.linkTekstowyTekst}>Zmień token</Text>
+            </Pressable>
           </>
         ) : null}
-
-        {saldo ? <KartaSalda saldo={saldo} /> : null}
-
-        <Pressable style={s.linkTekstowy} onPress={rozlacz}>
-          <Text style={s.linkTekstowyTekst}>Zmień token</Text>
-        </Pressable>
       </ScrollView>
+
+      <PasekSekcji
+        aktywna={sekcja}
+        onZmien={(nowa) => {
+          setPotwierdzenie(null);
+          setSekcja(nowa);
+        }}
+      />
 
       {token ? (
         <>
@@ -654,6 +712,24 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   pasekOkTekst: { color: C.akcent, fontSize: 14, fontWeight: '600' },
+
+  filtr: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: C.karta,
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  filtrTekst: { color: C.tekstPrzygaszony, fontSize: 13, flexShrink: 1 },
+  filtrLink: { color: C.akcent, fontSize: 13, fontWeight: '600' },
+
+  podpowiedz: { color: C.tekstPrzygaszony, fontSize: 11, lineHeight: 16, paddingHorizontal: 4 },
 
   linkTekstowy: { alignItems: 'center', paddingVertical: 18, marginTop: 4 },
   linkTekstowyTekst: { color: C.tekstPrzygaszony, fontSize: 13 },

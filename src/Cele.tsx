@@ -13,6 +13,8 @@ import {
 
 import { ApiError, postCel } from './api';
 import { godziny, zl } from './format';
+import { skonczona } from './licz';
+import { ocenLiczbe } from './limity';
 import { C } from './theme';
 import type { TargetProgress } from './types';
 
@@ -32,7 +34,9 @@ import type { TargetProgress } from './types';
 
 /** Pasek postępu z czystych `View` — żadnego SVG, żadnego modułu natywnego. */
 export function PasekPostepu({ procent, kolor }: { procent: number; kolor: string }) {
-  const szerokosc = Math.max(0, Math.min(100, procent));
+  // `Math.min(100, Math.max(0, NaN))` to nadal `NaN`, a `width: 'NaN%'` nie jest
+  // w React Native błędem — po prostu cicho psuje układ. Stąd `skonczona`.
+  const szerokosc = Math.max(0, Math.min(100, skonczona(procent) ?? 0));
   return (
     <View style={s.tor}>
       <View style={[s.wypelnienie, { width: `${szerokosc}%`, backgroundColor: kolor }]} />
@@ -84,7 +88,7 @@ export function KartaCelu({
 
       <View style={s.podPaskiem}>
         <Text style={[s.procent, { color: kolor }]}>
-          {postep.progressPercent.toFixed(1).replace('.', ',')}%
+          {(skonczona(postep.progressPercent) ?? 0).toFixed(1).replace('.', ',')}%
         </Text>
         <Text style={s.dni}>
           {postep.daysRemaining === 1 ? 'ostatni dzień' : `zostało ${postep.daysRemaining} dni`}
@@ -161,6 +165,8 @@ export function UstawCel({
   const [kwota, setKwota] = useState('');
   const [zapisuje, setZapisuje] = useState(false);
   const [blad, setBlad] = useState<string | null>(null);
+  /** Nietypowa kwota czeka na drugie dotknięcie — jak w formularzu wpisu. */
+  const [ostrzezenie, setOstrzezenie] = useState<string | null>(null);
   /**
    * `widoczny` przełącza się na `true` przy każdym otwarciu, ale komponent
    * NIE jest odmontowywany między otwarciami — `Modal` z `visible={false}`
@@ -172,6 +178,7 @@ export function UstawCel({
     if (widoczny) {
       setKwota(kwotaStartowa === null ? '' : String(kwotaStartowa).replace('.', ','));
       setBlad(null);
+      setOstrzezenie(null);
     }
   }
 
@@ -181,6 +188,20 @@ export function UstawCel({
       setBlad('Wpisz kwotę.');
       return;
     }
+
+    // Cel 60 000 zł na tydzień nie jest ambicją, tylko brakiem przecinka.
+    const ocena = ocenLiczbe(okres === 'MONTHLY' ? 'celMiesieczny' : 'celTygodniowy', wartosc);
+    if (ocena.blad !== null) {
+      setBlad(ocena.blad);
+      setOstrzezenie(null);
+      return;
+    }
+    if (ocena.ostrzezenie !== null && ostrzezenie !== ocena.ostrzezenie) {
+      setOstrzezenie(ocena.ostrzezenie);
+      setBlad(null);
+      return;
+    }
+    setOstrzezenie(null);
 
     setZapisuje(true);
     setBlad(null);
@@ -222,6 +243,15 @@ export function UstawCel({
           />
 
           {blad ? <Text style={s.blad}>{blad}</Text> : null}
+
+          {ostrzezenie !== null ? (
+            <View style={s.ostrzezenie}>
+              <Text style={s.ostrzezenieTekst}>{ostrzezenie}</Text>
+              <Text style={s.ostrzezeniePodpowiedz}>
+                Dotknij „Zapisz cel" ponownie, żeby potwierdzić.
+              </Text>
+            </View>
+          ) : null}
 
           <Pressable
             style={({ pressed }) => [s.zapisz, pressed && s.wcisniety, zapisuje && s.nieaktywny]}
@@ -335,6 +365,16 @@ const s = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   blad: { color: C.blad, fontSize: 14, marginTop: 8 },
+  ostrzezenie: {
+    backgroundColor: '#2a2416',
+    borderColor: C.ostrzezenie,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  ostrzezenieTekst: { color: C.ostrzezenie, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  ostrzezeniePodpowiedz: { color: C.tekstPrzygaszony, fontSize: 12, marginTop: 4 },
 
   zapisz: {
     backgroundColor: C.akcent,

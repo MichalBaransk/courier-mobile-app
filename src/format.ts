@@ -8,16 +8,39 @@
 
 const przecinek = (v: number, miejsca: number): string => v.toFixed(miejsca).replace('.', ',');
 
-export const zl = (v: number): string => `${przecinek(v, 2)} zł`;
+/**
+ * Ostatnia linia obrony przed `NaN` i `Infinity` na ekranie.
+ *
+ * `(0).toFixed(2)` daje `"0,00"`, ale `(0/0).toFixed(2)` daje `"NaN"`,
+ * a `(1/0).toFixed(2)` — `"Infinity"`. Jedno i drugie wygląda jak zepsuta
+ * aplikacja, choć dane są tylko puste. Samych dzieleń pilnuje `licz.ts`;
+ * to jest siatka na wypadek liczby, która przyszła z serwera albo powstała
+ * w miejscu, o którym zapomniałem.
+ */
+const MYSLNIK = '—';
+
+const bezpieczne = (v: number | null | undefined, formatuj: (n: number) => string): string =>
+  v == null || !Number.isFinite(v) ? MYSLNIK : formatuj(v);
+
+export const zl = (v: number | null | undefined): string =>
+  bezpieczne(v, (n) => `${przecinek(n, 2)} zł`);
 
 /** Ze znakiem — ujemne „do przelewu" ma być widoczne, nie ukryte. */
-export const zlZeZnakiem = (v: number): string => `${v > 0 ? '+' : ''}${przecinek(v, 2)} zł`;
+export const zlZeZnakiem = (v: number | null | undefined): string =>
+  bezpieczne(v, (n) => `${n > 0 ? '+' : ''}${przecinek(n, 2)} zł`);
 
-export const km = (v: number | null): string => (v == null ? '—' : `${przecinek(v, 1)} km`);
+export const km = (v: number | null | undefined): string =>
+  bezpieczne(v, (n) => `${przecinek(n, 1)} km`);
 
-export const godziny = (v: number): string => `${przecinek(v, 2)} h`;
+export const godziny = (v: number | null | undefined): string =>
+  bezpieczne(v, (n) => `${przecinek(n, 2)} h`);
 
-export const litry = (v: number): string => `${przecinek(v, 2)} L`;
+export const litry = (v: number | null | undefined): string =>
+  bezpieczne(v, (n) => `${przecinek(n, 2)} L`);
+
+/** Stawka `2,81` — bez jednostki, bo ta bywa w podpisie obok. */
+export const stawka = (v: number | null | undefined): string =>
+  bezpieczne(v, (n) => przecinek(n, 2));
 
 /** `2026-08-16` → `sobota, 16 sierpnia`. Bez Intl, bez stref — data przychodzi gotowa. */
 const DNI = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];

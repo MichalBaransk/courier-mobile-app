@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { godziny, km, zl } from './format';
+import { iloraz, procentZmiany } from './licz';
 import { C } from './theme';
 import type { DailySummary, PeriodSummary } from './types';
 
@@ -35,8 +36,10 @@ import type { DailySummary, PeriodSummary } from './types';
  */
 export function kosztPaliwaNaKm(odniesienie: PeriodSummary | null): number | null {
   if (odniesienie === null) return null;
+  // Oba warunki są potrzebne: zerowy dystans to dzielenie przez zero, a zerowe
+  // paliwo dałoby stawkę 0 zł/km i wmówiło, że jazda nic nie kosztuje.
   if (odniesienie.totalDistanceKm <= 0 || odniesienie.totalFuelCost <= 0) return null;
-  return odniesienie.totalFuelCost / odniesienie.totalDistanceKm;
+  return iloraz(odniesienie.totalFuelCost, odniesienie.totalDistanceKm);
 }
 
 export function KartaAnalizyDnia({
@@ -68,7 +71,7 @@ export function KartaAnalizyDnia({
         wartosc={stawkaDnia === null ? '—' : `${zl(stawkaDnia)}/h`}
         delta={
           stawkaDnia !== null && sredniaStawka !== null && sredniaStawka > 0
-            ? procent(stawkaDnia, sredniaStawka)
+            ? procentZmiany(stawkaDnia, sredniaStawka)
             : null
         }
       />
@@ -151,38 +154,38 @@ export function PorownanieOkresow({
             etykieta="Razem netto"
             teraz={zl(biezacy.grandTotalNetto)}
             wtedy={zl(poprzedni.grandTotalNetto)}
-            delta={procent(biezacy.grandTotalNetto, poprzedni.grandTotalNetto)}
+            delta={procentZmiany(biezacy.grandTotalNetto, poprzedni.grandTotalNetto)}
           />
           <WierszPorownania
             etykieta="Brutto"
             teraz={zl(biezacy.totalGross)}
             wtedy={zl(poprzedni.totalGross)}
-            delta={procent(biezacy.totalGross, poprzedni.totalGross)}
+            delta={procentZmiany(biezacy.totalGross, poprzedni.totalGross)}
           />
           <WierszPorownania
             etykieta="Czas pracy"
             teraz={godziny(biezacy.totalWorkHours)}
             wtedy={godziny(poprzedni.totalWorkHours)}
-            delta={procent(biezacy.totalWorkHours, poprzedni.totalWorkHours)}
+            delta={procentZmiany(biezacy.totalWorkHours, poprzedni.totalWorkHours)}
           />
           <WierszPorownania
             etykieta="Stawka"
             teraz={`${zl(biezacy.avgHourlyRateNetto)}/h`}
             wtedy={`${zl(poprzedni.avgHourlyRateNetto)}/h`}
-            delta={procent(biezacy.avgHourlyRateNetto, poprzedni.avgHourlyRateNetto)}
+            delta={procentZmiany(biezacy.avgHourlyRateNetto, poprzedni.avgHourlyRateNetto)}
           />
           <WierszPorownania
             etykieta="Dystans"
             teraz={km(biezacy.totalDistanceKm)}
             wtedy={km(poprzedni.totalDistanceKm)}
-            delta={procent(biezacy.totalDistanceKm, poprzedni.totalDistanceKm)}
+            delta={procentZmiany(biezacy.totalDistanceKm, poprzedni.totalDistanceKm)}
           />
           <WierszPorownania
             etykieta="Paliwo"
             teraz={zl(biezacy.totalFuelCost)}
             wtedy={zl(poprzedni.totalFuelCost)}
             /* Wzrost kosztu to zmiana NA GORSZE — kolor odwrócony. */
-            delta={procent(biezacy.totalFuelCost, poprzedni.totalFuelCost)}
+            delta={procentZmiany(biezacy.totalFuelCost, poprzedni.totalFuelCost)}
             odwrocKolor
           />
 
@@ -197,12 +200,6 @@ export function PorownanieOkresow({
 }
 
 /* ========================================================================== */
-
-/** Zmiana procentowa. `null`, gdy podstawa to zero — dzielenie nie ma sensu. */
-function procent(teraz: number, wtedy: number): number | null {
-  if (wtedy === 0) return null;
-  return ((teraz - wtedy) / Math.abs(wtedy)) * 100;
-}
 
 function Delta({ wartosc, odwrocKolor }: { wartosc: number | null; odwrocKolor?: boolean }) {
   if (wartosc === null) return <Text style={s.deltaPusta}>—</Text>;

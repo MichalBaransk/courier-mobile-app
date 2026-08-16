@@ -24,6 +24,7 @@ import {
 } from './api';
 import { DATA_TESTOWA } from './config';
 import { krotkaData, normalizujGodzine, przesunDate } from './format';
+import { ocenLiczbe, ocenParagon, ocenZmiane, polacz, type Ocena } from './limity';
 import { WybierzDate } from './WybierzDate';
 import { WybierzGodzine } from './WybierzGodzine';
 import { C } from './theme';
@@ -35,10 +36,18 @@ import { C } from './theme';
  * endpointów (jeden element = jeden zapis). Dzięki temu nieudany zapis paliwa
  * nie unieważnia zapisanych przed chwilą kilometrów.
  *
- * Walidacja jest tu MINIMALNA — sprawdzamy tylko, czy da się odczytać liczbę.
- * Resztą zajmuje się serwer i to jego komunikaty pokazujemy użytkownikowi:
- * są po polsku i wskazują konkretne pole. Duplikowanie tych reguł w aplikacji
- * skończyłoby się dwoma zestawami zasad, które się rozjeżdżają.
+ * Walidacja jest DWUWARSTWOWA i celowo asymetryczna.
+ *
+ * Reguły biznesowe (co wolno, jakie limity, jak liczyć godziny) zostają
+ * po stronie serwera i to jego komunikaty pokazujemy — są po polsku i wskazują
+ * konkretne pole. Duplikowanie ich tutaj skończyłoby się dwoma zestawami
+ * zasad, które się rozjeżdżają.
+ *
+ * Ale limity serwera są luźne z premedytacją (napiwek do 10 000 zł), więc
+ * literówka przechodzi bez mrugnięcia: `45,50` bez przecinka to `4550` —
+ * kwota legalna i absurdalna zarazem. Dlatego `limity.ts` dokłada warstwę
+ * „to wygląda dziwnie": nie blokuje, tylko żąda drugiego dotknięcia „Zapisz".
+ * Użytkownik może mieć rację i musi mieć jak postawić na swoim.
  */
 
 type Rodzaj = 'napiwek' | 'paliwo' | 'dystans' | 'brutto' | 'zmiana';
@@ -101,7 +110,10 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
   const [potwierdzKasowanie, setPotwierdzKasowanie] = useState(false);
   /** Które pole godziny otwarło zegar: `od`, `do`, albo żadne. */
   const [zegar, setZegar] = useState<'od' | 'do' | null>(null);
-  /** Ostrzeżenie o nadpisaniu wpisu z tej sesji — czeka na drugie dotknięcie. */
+  /**
+   * Treść ostrzeżenia czekającego na potwierdzenie — nietypowa wartość albo
+   * nadpisanie wpisu z tej sesji. `null` = nic nie czeka.
+   */
   const [nadpisanie, setNadpisanie] = useState<string | null>(null);
 
   /** `null` = dzisiaj, czyli data wyznaczona po stronie serwera. */
@@ -138,72 +150,108 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
    * Rozgałęzienie na `zmiana` vs reszta jest tu celowe: dzięki niemu sprawdzenie
    * `wartosc === null` zawęża typ i nie trzeba nigdzie rzutować przez `as`.
    */
-  const zbudujZadanie = (): (() => Promise<ZapisOdpowiedz>) | string => {
+  type Przygotowane =
+    | { ok: false; blad: string }
+    | { ok: true; ostrzezenie: string | null; zadanie: () => Promise<ZapisOdpowiedz> };
+
+  const przygotuj = (): Przygotowane => {
     // Data wspólna dla wszystkich rodzajów wpisu. `null` = decyduje serwer.
     const data: string | null = wybranaData;
+    const zBledem = (blad: string): Przygotowane => ({ ok: false, blad });
+    const zOcena = (o: Ocena, zadanie: () => Promise<ZapisOdpowiedz>): Przygotowane =>
+      o.blad !== null ? zBledem(o.blad) : { ok: true, ostrzezenie: o.ostrzezenie, zadanie };
 
     if (rodzaj === 'zmiana') {
-      if (od.trim() === '' && doGodz.trim() === '') return 'Podaj przynajmniej jedną godzinę.';
+      if (od.trim() === '' && doGodz.trim() === '')
+        return zBledem('Podaj przynajmniej jedną godzinę.');
 
       // `9` znaczy `09:00`, `930` znaczy `09:30` — serwer przyjmuje tylko GG:MM.
       const wyjazd = od.trim() === '' ? null : normalizujGodzine(od);
       const zjazd = doGodz.trim() === '' ? null : normalizujGodzine(doGodz);
-      if (od.trim() !== '' && wyjazd === null) return 'Nie rozumiem godziny wyjazdu.';
-      if (doGodz.trim() !== '' && zjazd === null) return 'Nie rozumiem godziny zjazdu.';
+      if (od.trim() !== '' && wyjazd === null) return zBledem('Nie rozumiem godziny wyjazdu.');
+      if (doGodz.trim() !== '' && zjazd === null) return zBledem('Nie rozumiem godziny zjazdu.');
 
-      return () => postZmiana(token, wyjazd, zjazd, data);
+      return zOcena(ocenZmiane(wyjazd, zjazd), () => postZmiana(token, wyjazd, zjazd, data));
     }
 
     const wartosc = liczba(kwota);
-    if (wartosc === null) return 'Wpisz liczbę.';
+    if (wartosc === null) return zBledem('Wpisz liczbę.');
 
     switch (rodzaj) {
       case 'napiwek':
-        return () => postNapiwek(token, wartosc, data);
+        return zOcena(ocenLiczbe('napiwek', wartosc), () => postNapiwek(token, wartosc, data));
       case 'dystans':
-        return () => postDystans(token, wartosc, data);
+        return zOcena(ocenLiczbe('dystans', wartosc), () => postDystans(token, wartosc, data));
       case 'brutto':
-        return () => postBrutto(token, wartosc, data);
-      case 'paliwo':
-        return () => postPaliwo(token, wartosc, liczba(litry), liczba(cena), data);
+        return zOcena(ocenLiczbe('brutto', wartosc), () => postBrutto(token, wartosc, data));
+      case 'paliwo': {
+        const l = liczba(litry);
+        const c = liczba(cena);
+        return zOcena(
+          polacz(
+            ocenLiczbe('paliwo', wartosc),
+            ocenLiczbe('litry', l),
+            ocenLiczbe('cenaZaLitr', c),
+            ocenParagon(wartosc, l, c)
+          ),
+          () => postPaliwo(token, wartosc, l, c, data)
+        );
+      }
     }
 
     // Nieosiągalne przy obecnym zestawie rodzajów — switch wyżej pokrywa
     // wszystkie. Zwykły `return` zamiast kontroli wyczerpania przez `never`,
     // bo tej drugiej nie miałem jak skompilować u siebie.
-    return 'Nieobsługiwany rodzaj wpisu.';
+    return zBledem('Nieobsługiwany rodzaj wpisu.');
   };
+
+  /**
+   * Rodzaje, które serwer NADPISUJE.
+   *
+   * `dystans`, `brutto` i `zmiana` idą przez upsert na `daily_records`, więc
+   * drugi zapis kasuje pierwszy bez śladu. Napiwki i paliwo to osobne wiersze
+   * i dodanie drugiego jest zwykle zamierzone — tam ostrzeżenie tylko
+   * przeszkadzałoby.
+   */
+  const NADPISUJACE: Rodzaj[] = ['dystans', 'brutto', 'zmiana'];
 
   const zapisz = async () => {
     setBlad(null);
 
-    const zadanie = zbudujZadanie();
-    if (typeof zadanie === 'string') {
-      setBlad(zadanie);
+    const gotowe = przygotuj();
+    if (!gotowe.ok) {
+      setNadpisanie(null);
+      setBlad(gotowe.blad);
       return;
     }
 
-    /**
-     * Ostrzeżenie o nadpisaniu — tylko dla rodzajów, które serwer NADPISUJE.
-     *
-     * `dystans`, `brutto` i `zmiana` idą przez upsert na `daily_records`, więc
-     * drugi zapis kasuje pierwszy bez śladu. Napiwki i paliwo to osobne wiersze
-     * i dodanie drugiego jest zwykle zamierzone — tam ostrzeżenie tylko
-     * przeszkadzałoby.
-     */
-    const nadpisujace: Rodzaj[] = ['dystans', 'brutto', 'zmiana'];
     const poprzedni = wSesji.find((w) => w.rodzaj === rodzaj);
-    if (nadpisujace.includes(rodzaj) && poprzedni && nadpisanie === null) {
-      setNadpisanie(poprzedni.opis);
+    const oNadpisaniu =
+      NADPISUJACE.includes(rodzaj) && poprzedni
+        ? `W tej sesji zapisałeś już: ${poprzedni.opis}. Serwer nadpisze tamtą wartość.`
+        : null;
+
+    /**
+     * JEDEN mechanizm potwierdzania na dwa różne powody: nietypowa wartość
+     * i nadpisanie wpisu z tej sesji. Tokenem jest sama TREŚĆ ostrzeżenia —
+     * dzięki temu poprawienie kwoty po zobaczeniu komunikatu automatycznie
+     * unieważnia potwierdzenie i trzeba potwierdzić nową wartość.
+     */
+    const doPotwierdzenia = [gotowe.ostrzezenie, oNadpisaniu].filter(Boolean).join('\n\n');
+    if (doPotwierdzenia !== '' && nadpisanie !== doPotwierdzenia) {
+      setNadpisanie(doPotwierdzenia);
       return;
     }
     setNadpisanie(null);
 
     setZapisuje(true);
     try {
-      const wynik = await zadanie();
+      const wynik = await gotowe.zadanie();
       const opis = opisWpisu();
-      setWSesji((lista) => [...lista.filter((w) => w.rodzaj !== rodzaj || !nadpisujace.includes(rodzaj)), { rodzaj, opis }]);
+      setWSesji((lista) => [
+        ...lista.filter((w) => w.rodzaj !== rodzaj || !NADPISUJACE.includes(rodzaj)),
+        { rodzaj, opis },
+      ]);
       wyczysc();
       onZapisano(wynik);
     } catch (err) {
@@ -442,11 +490,9 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
 
           {nadpisanie !== null ? (
             <View style={s.ostrzezenie}>
-              <Text style={s.ostrzezenieTekst}>
-                W tej sesji zapisałeś już: {nadpisanie}
-              </Text>
+              <Text style={s.ostrzezenieTekst}>{nadpisanie}</Text>
               <Text style={s.ostrzezeniePodpowiedz}>
-                Serwer nadpisze tamtą wartość. Dotknij „Zapisz" ponownie, żeby potwierdzić.
+                Dotknij „Zapisz" ponownie, żeby potwierdzić — albo popraw wartość.
               </Text>
             </View>
           ) : null}

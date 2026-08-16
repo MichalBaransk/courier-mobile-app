@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { km, zl } from './format';
+import { km, stawka, zl } from './format';
+import { iloraz } from './licz';
 import { C } from './theme';
 import type { CourseOfferItem } from './types';
 
@@ -88,8 +89,10 @@ export function policzOferty(oferty: CourseOfferItem[]): StatystykiOfert {
     przyjete,
     odrzucone,
     oczekujace,
-    sredniaStawka: ileStawek > 0 ? sumaStawek / ileStawek : null,
-    wazonaStawka: sumaKm > 0 ? sumaNetto / sumaKm : null,
+    // `iloraz` zwraca `null` przy zerowym mianowniku — dzień bez ani jednej
+    // oferty z dystansem daje „—", a nie `NaN`.
+    sredniaStawka: iloraz(sumaStawek, ileStawek),
+    wazonaStawka: iloraz(sumaNetto, sumaKm),
     najlepsza,
     najgorsza,
     sumaBrutto,
@@ -136,7 +139,7 @@ export function KartaOfert({
         <Kafelek wartosc={String(st.oplacalne)} podpis="opłacalne" kolor={C.akcent} />
         <Kafelek wartosc={String(st.nieoplacalne)} podpis="odpadło" kolor={C.blad} />
         <Kafelek
-          wartosc={st.wazonaStawka === null ? '—' : stawka(st.wazonaStawka)}
+          wartosc={stawka(st.wazonaStawka)}
           podpis="zł/km ważona"
         />
       </View>
@@ -241,11 +244,6 @@ function Wiersz({ etykieta, wartosc }: { etykieta: string; wartosc: string }) {
       <Text style={s.wartosc}>{wartosc}</Text>
     </View>
   );
-}
-
-/** Stawka zł/km — dwa miejsca, przecinek, bez jednostki (ta bywa w podpisie). */
-function stawka(v: number): string {
-  return v.toFixed(2).replace('.', ',');
 }
 
 const s = StyleSheet.create({
