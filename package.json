@@ -20,7 +20,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "sprawdz": "tsc --noEmit",
-    "patch": "bash scripts/zastosuj-patch.sh"
+    "patch": "bash scripts/zastosuj-patch.sh",
+    "wdroz": "bash scripts/wdroz.sh"
   },
   "private": true
 }
