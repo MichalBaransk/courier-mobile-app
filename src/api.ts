@@ -1,5 +1,5 @@
 import { API_BASE, REQUEST_TIMEOUT_MS } from './config';
-import type { ApiInfo, DailySummary } from './types';
+import type { ApiInfo, DailySummary, DailyTotals, PeriodSummary, Saldo } from './types';
 
 /**
  * Klient REST API bota.
@@ -169,3 +169,31 @@ export const postZmiana = (
   doGodz: string | null,
   data: string | null
 ) => zapisz('/api/v1/zmiana', token, { od, do: doGodz, data });
+
+/* ========================================================================== */
+/*  Historia (krok 4)                                                         */
+/* ========================================================================== */
+
+/** Podsumowanie wybranego dnia. */
+export async function getDzien(token: string, data: string): Promise<DailySummary> {
+  const dane = await request<unknown>(`/api/v1/dzien/${data}`, token);
+  assertDailySummary(dane);
+  return dane;
+}
+
+/** Dzienne sumy dla zakresu — jedno wywołanie na cały tydzień albo miesiąc. */
+export async function getDni(token: string, od: string, doDaty: string): Promise<DailyTotals[]> {
+  const dane = await request<{ items?: unknown }>(
+    `/api/v1/dni?od=${od}&do=${doDaty}`,
+    token
+  );
+  return Array.isArray(dane.items) ? (dane.items as DailyTotals[]) : [];
+}
+
+export function getOkres(token: string, od: string, doDaty: string): Promise<PeriodSummary> {
+  return request<PeriodSummary>(`/api/v1/okres?od=${od}&do=${doDaty}`, token);
+}
+
+export function getSaldo(token: string): Promise<Saldo> {
+  return request<Saldo>('/api/v1/saldo', token);
+}

@@ -39,3 +39,41 @@ export interface DailySummary {
   fuelReceiptCount: number;
   distanceKm: number | null;
 }
+
+/** Lekki wiersz dzienny z `/api/v1/dni` — pod wykres i kalendarz. */
+export interface DailyTotals {
+  date: string;
+  grossEarnings: number;
+  netEarnings: number;
+  cashTipsTotal: number;
+  totalNetto: number;
+  workHours: number;
+  hourlyRateNetto: number;
+  distanceKm: number;
+  fuelCost: number;
+}
+
+/** Podsumowanie zakresu z `/api/v1/okres`. */
+export interface PeriodSummary {
+  startDate: string;
+  endDate: string;
+  totalGross: number;
+  totalNettoEarnings: number;
+  totalCashTips: number;
+  grandTotalNetto: number;
+  totalWalletPayouts: number;
+  totalDoPrzelewu: number;
+  totalWorkHours: number;
+  avgHourlyRateNetto: number;
+  totalFuelCost: number;
+  totalFuelLiters: number;
+  avgPricePerLiter: number | null;
+  totalDistanceKm: number;
+}
+
+/** Saldo Portfela Glovo — suma transakcji ze znakiem. */
+export interface Saldo {
+  balance: number;
+  transactionCount: number;
+  lastDate: string | null;
+}

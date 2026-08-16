@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -6,189 +6,61 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
-import { ApiError, getInfo, getToday, type ZapisOdpowiedz } from './src/api';
-import { clearToken, readToken, saveToken } from './src/storage';
-import { dataPoPolsku, godziny, km, litry, zl, zlZeZnakiem } from './src/format';
+import {
+  ApiError,
+  getDni,
+  getDzien,
+  getOkres,
+  getSaldo,
+  getToday,
+  type ZapisOdpowiedz,
+} from './src/api';
+import { clearToken, readToken } from './src/storage';
+import { dataPoPolsku, przesunDate } from './src/format';
+import { nazwaMiesiaca, numerTygodniaISO, zakresMiesiaca, zakresTygodnia } from './src/okresy';
 import { DodajWpis } from './src/DodajWpis';
+import { EkranTokena } from './src/EkranTokena';
+import { KartaDnia, KartaOkresu, KartaSalda } from './src/Karty';
+import { KalendarzMiesiaca, WykresTygodnia } from './src/Wykresy';
 import { C } from './src/theme';
-import type { DailySummary } from './src/types';
+import type { DailySummary, DailyTotals, PeriodSummary, Saldo } from './src/types';
 
-/* ========================================================================== */
-/*  Ekran wpisania tokena                                                     */
-/* ========================================================================== */
-
-function EkranTokena({ onZapisano }: { onZapisano: (token: string) => void }) {
-  const [wartosc, setWartosc] = useState('');
-  const [sprawdzam, setSprawdzam] = useState(false);
-  const [blad, setBlad] = useState<string | null>(null);
-
-  const zapisz = async () => {
-    const token = wartosc.trim();
-    if (!token) {
-      setBlad('Wklej token z pliku .env na serwerze.');
-      return;
-    }
-
-    setSprawdzam(true);
-    setBlad(null);
-    try {
-      // Token sprawdzamy PRZED zapisaniem — inaczej aplikacja zapamiętałaby
-      // wartość, która i tak nie działa, i trzeba by ją kasować ręcznie.
-      await getInfo(token);
-      await saveToken(token);
-      onZapisano(token);
-    } catch (err) {
-      setBlad(err instanceof ApiError ? err.message : 'Nie udało się połączyć.');
-    } finally {
-      setSprawdzam(false);
-    }
-  };
-
-  return (
-    <View style={s.ekranSrodek}>
-      <Text style={s.tytulDuzy}>GlovoBot</Text>
-      <Text style={s.podtytul}>Wklej token API z pliku .env na serwerze</Text>
-
-      <TextInput
-        style={s.pole}
-        value={wartosc}
-        onChangeText={setWartosc}
-        placeholder="API_TOKEN"
-        placeholderTextColor={C.tekstPrzygaszony}
-        autoCapitalize="none"
-        autoCorrect={false}
-        secureTextEntry
-        editable={!sprawdzam}
-      />
-
-      {blad ? <Text style={s.blad}>{blad}</Text> : null}
-
-      <Pressable
-        style={({ pressed }) => [s.przycisk, pressed && s.przyciskWcisniety, sprawdzam && s.przyciskNieaktywny]}
-        onPress={zapisz}
-        disabled={sprawdzam}
-      >
-        {sprawdzam ? (
-          <ActivityIndicator color={C.tlo} />
-        ) : (
-          <Text style={s.przyciskTekst}>Połącz</Text>
-        )}
-      </Pressable>
-
-      <Text style={s.stopka}>
-        Token trafia do szyfrowanego magazynu systemu, nie do kodu aplikacji.
-      </Text>
-    </View>
-  );
-}
-
-/* ========================================================================== */
-/*  Karta podsumowania dnia                                                   */
-/* ========================================================================== */
-
-function Wiersz({
-  etykieta,
-  wartosc,
-  kolor,
-  duzy,
-}: {
-  etykieta: string;
-  wartosc: string;
-  kolor?: string;
-  duzy?: boolean;
-}) {
-  return (
-    <View style={s.wiersz}>
-      <Text style={s.etykieta}>{etykieta}</Text>
-      <Text style={[s.wartosc, duzy && s.wartoscDuza, kolor ? { color: kolor } : null]}>{wartosc}</Text>
-    </View>
-  );
-}
-
-function Sekcja({ tytul, children }: { tytul: string; children: ReactNode }) {
-  return (
-    <View style={s.karta}>
-      <Text style={s.naglowekSekcji}>{tytul}</Text>
-      {children}
-    </View>
-  );
-}
-
-function EkranDnia({ dane }: { dane: DailySummary }) {
-  const brakGodzin = dane.workHours === 0;
-
-  return (
-    <>
-      <Text style={s.data}>{dataPoPolsku(dane.date)}</Text>
-
-      <Sekcja tytul="ZAROBEK">
-        <Wiersz etykieta="Brutto" wartosc={zl(dane.grossEarnings)} />
-        <Wiersz etykieta="Netto ze zleceń" wartosc={zl(dane.netEarnings)} />
-        <Wiersz etykieta="Napiwki gotówką" wartosc={zl(dane.cashTipsTotal)} />
-        <View style={s.kreska} />
-        <Wiersz etykieta="Razem netto" wartosc={zl(dane.totalNetto)} kolor={C.akcent} duzy />
-      </Sekcja>
-
-      <Sekcja tytul="PORTFEL">
-        <Wiersz etykieta="Wypłacone z portfela" wartosc={zl(dane.walletPayouts)} />
-        <Wiersz
-          etykieta="Do przelewu"
-          wartosc={zlZeZnakiem(dane.doPrzelewu)}
-          kolor={dane.doPrzelewu < 0 ? C.blad : C.tekst}
-        />
-        <Text style={s.przypis}>Napiwki nie wchodzą do przelewu — są już w kieszeni.</Text>
-      </Sekcja>
-
-      <Sekcja tytul="ZMIANA">
-        <Wiersz
-          etykieta="Godziny"
-          wartosc={dane.workFrom && dane.workTo ? `${dane.workFrom} – ${dane.workTo}` : '—'}
-        />
-        <Wiersz etykieta="Czas pracy" wartosc={brakGodzin ? '—' : godziny(dane.workHours)} />
-        <Wiersz
-          etykieta="Stawka"
-          wartosc={brakGodzin ? '—' : `${zl(dane.hourlyRateNetto)}/h`}
-          kolor={brakGodzin ? C.tekstPrzygaszony : C.akcent}
-        />
-        <Wiersz etykieta="Dystans" wartosc={km(dane.distanceKm)} />
-      </Sekcja>
-
-      <Sekcja tytul="PALIWO">
-        <Wiersz etykieta="Koszt" wartosc={zl(dane.fuelCost)} />
-        <Wiersz etykieta="Ilość" wartosc={dane.fuelLiters > 0 ? litry(dane.fuelLiters) : '—'} />
-        <Wiersz
-          etykieta="Cena za litr"
-          wartosc={dane.fuelPricePerLiter != null ? `${zl(dane.fuelPricePerLiter)}/L` : '—'}
-        />
-        {dane.fuelCost > 0 ? (
-          <Text style={s.przypis}>
-            Paliwo nie pomniejsza „razem netto" — świadoma decyzja, patrz dług techniczny §17.
-          </Text>
-        ) : null}
-      </Sekcja>
-    </>
-  );
-}
-
-/* ========================================================================== */
-/*  Korzeń aplikacji                                                          */
-/* ========================================================================== */
-
+type Widok = 'dzien' | 'tydzien' | 'miesiac';
 type Stan = 'wczytywanie' | 'brakTokena' | 'gotowe';
+
+const WIDOKI: Array<{ id: Widok; etykieta: string }> = [
+  { id: 'dzien', etykieta: 'Dzień' },
+  { id: 'tydzien', etykieta: 'Tydzień' },
+  { id: 'miesiac', etykieta: 'Miesiąc' },
+];
 
 export default function App() {
   const [stan, setStan] = useState<Stan>('wczytywanie');
   const [token, setToken] = useState<string | null>(null);
-  const [dane, setDane] = useState<DailySummary | null>(null);
+
+  /**
+   * Dzisiejsza data WEDŁUG SERWERA. Ustawiana przy pierwszym pobraniu i od tego
+   * momentu jedyny punkt odniesienia dla nawigacji. Zegar telefonu nie bierze
+   * udziału w niczym — doba kończy się o północy w Europe/Warsaw (§8a).
+   */
+  const [dzisiaj, setDzisiaj] = useState<string | null>(null);
+  /** Dzień, na którym stoi nawigacja. */
+  const [kursor, setKursor] = useState<string | null>(null);
+  const [widok, setWidok] = useState<Widok>('dzien');
+
+  const [dzien, setDzien] = useState<DailySummary | null>(null);
+  const [dniOkresu, setDniOkresu] = useState<DailyTotals[]>([]);
+  const [okres, setOkres] = useState<PeriodSummary | null>(null);
+  const [saldo, setSaldo] = useState<Saldo | null>(null);
+
   const [blad, setBlad] = useState<string | null>(null);
+  const [laduje, setLaduje] = useState(false);
   const [odswiezam, setOdswiezam] = useState(false);
   const [dodawanie, setDodawanie] = useState(false);
-  /** Krótkie potwierdzenie po zapisie; znika przy następnej akcji. */
   const [potwierdzenie, setPotwierdzenie] = useState<string | null>(null);
 
   useEffect(() => {
@@ -203,49 +75,120 @@ export default function App() {
     })();
   }, []);
 
+  const obsluzBlad = useCallback(async (err: unknown) => {
+    if (err instanceof ApiError && err.isUnauthorized) {
+      // Token przestał działać (np. wymieniony na serwerze) — kasujemy go
+      // i wracamy do ekranu wpisywania zamiast pokazywać wieczny błąd.
+      await clearToken();
+      setToken(null);
+      setStan('brakTokena');
+      return;
+    }
+    setBlad(err instanceof ApiError ? err.message : 'Coś poszło nie tak.');
+  }, []);
+
   const pobierz = useCallback(
-    async (t: string) => {
+    async (t: string, doWidoku: Widok, naDzien: string | null) => {
       setBlad(null);
+      setLaduje(true);
       try {
-        setDane(await getToday(t));
-      } catch (err) {
-        if (err instanceof ApiError && err.isUnauthorized) {
-          // Token przestał działać (np. wymieniony na serwerze) — kasujemy go
-          // i wracamy do ekranu wpisywania zamiast pokazywać wieczny błąd.
-          await clearToken();
-          setToken(null);
-          setDane(null);
-          setStan('brakTokena');
+        if (doWidoku === 'dzien') {
+          const dane = naDzien === null ? await getToday(t) : await getDzien(t, naDzien);
+          setDzien(dane);
+          setKursor(dane.date);
+          setDzisiaj((poprzednie) => poprzednie ?? dane.date);
           return;
         }
-        setBlad(err instanceof ApiError ? err.message : 'Coś poszło nie tak.');
+
+        // Widoki okresowe potrzebują punktu odniesienia; przy pierwszym wejściu
+        // bierzemy go z serwera, żeby nie zgadywać dnia z zegara telefonu.
+        const kotwica = naDzien ?? dzisiaj ?? (await getToday(t)).date;
+        const zakres = doWidoku === 'tydzien' ? zakresTygodnia(kotwica) : zakresMiesiaca(kotwica);
+
+        const [dni, podsumowanie] = await Promise.all([
+          getDni(t, zakres.od, zakres.do),
+          getOkres(t, zakres.od, zakres.do),
+        ]);
+        setDniOkresu(dni);
+        setOkres(podsumowanie);
+        setKursor(kotwica);
+        setDzisiaj((poprzednie) => poprzednie ?? kotwica);
+      } catch (err) {
+        await obsluzBlad(err);
+      } finally {
+        setLaduje(false);
       }
     },
-    []
+    [dzisiaj, obsluzBlad]
   );
 
   useEffect(() => {
-    if (stan === 'gotowe' && token) void pobierz(token);
-  }, [stan, token, pobierz]);
+    if (stan !== 'gotowe' || !token) return;
+    void pobierz(token, widok, kursor);
+    // `kursor` i `pobierz` celowo poza zależnościami — kursor zmienia nawigacja,
+    // która sama woła `pobierz`. Trzymanie ich tutaj dawałoby podwójne zapytanie.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stan, token, widok]);
+
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token) return;
+    getSaldo(token)
+      .then(setSaldo)
+      .catch(() => setSaldo(null));
+  }, [stan, token]);
+
+  const przesun = useCallback(
+    (kierunek: -1 | 1) => {
+      if (!token || !kursor) return;
+
+      const nowy =
+        widok === 'dzien'
+          ? przesunDate(kursor, kierunek)
+          : widok === 'tydzien'
+            ? przesunDate(kursor, kierunek * 7)
+            : // Miesiąc: przez pierwszy dzień bieżącego miesiąca, żeby przeskok
+              // 31 → 30 dni nie gubił lutego ani nie przeskakiwał o dwa.
+              przesunDate(zakresMiesiaca(kursor).od, kierunek === 1 ? 32 : -1);
+
+      // Nie wchodzimy w przyszłość — nie ma tam czego pokazać.
+      if (widok === 'dzien' && dzisiaj !== null && kierunek === 1 && nowy > dzisiaj) return;
+
+      setPotwierdzenie(null);
+      void pobierz(token, widok, nowy);
+    },
+    [token, kursor, widok, dzisiaj, pobierz]
+  );
 
   const odswiez = useCallback(async () => {
     if (!token) return;
     setOdswiezam(true);
-    await pobierz(token);
+    await pobierz(token, widok, kursor);
     setOdswiezam(false);
-  }, [token, pobierz]);
+  }, [token, widok, kursor, pobierz]);
 
   const rozlacz = useCallback(async () => {
     await clearToken();
     setToken(null);
-    setDane(null);
+    setDzien(null);
+    setDzisiaj(null);
+    setKursor(null);
     setBlad(null);
     setStan('brakTokena');
   }, []);
 
+  /** Dotknięcie słupka albo dnia w kalendarzu przenosi do widoku dnia. */
+  const otworzDzien = useCallback(
+    (data: string) => {
+      if (!token) return;
+      setWidok('dzien');
+      void pobierz(token, 'dzien', data);
+    },
+    [token, pobierz]
+  );
+
   if (stan === 'wczytywanie') {
     return (
-      <View style={[s.tlo, s.ekranSrodek]}>
+      <View style={[s.tlo, s.srodek]}>
         <StatusBar style="light" />
         <ActivityIndicator size="large" color={C.akcent} />
       </View>
@@ -266,9 +209,63 @@ export default function App() {
     );
   }
 
+  const tydzien = kursor === null ? null : zakresTygodnia(kursor);
+  const naglowek =
+    kursor === null || tydzien === null
+      ? '…'
+      : widok === 'dzien'
+        ? dataPoPolsku(kursor)
+        : widok === 'tydzien'
+          ? `Tydzień ${numerTygodniaISO(kursor)} · ${tydzien.od.slice(8)}–${tydzien.do.slice(8)}`
+          : nazwaMiesiaca(kursor);
+
+  const wPrzodZablokowane =
+    widok === 'dzien' && dzisiaj !== null && kursor !== null && kursor >= dzisiaj;
+
   return (
     <View style={s.tlo}>
       <StatusBar style="light" />
+
+      <View style={s.gora}>
+        <View style={s.zakladki}>
+          {WIDOKI.map((w) => (
+            <Pressable
+              key={w.id}
+              style={[s.zakladka, widok === w.id && s.zakladkaAktywna]}
+              onPress={() => {
+                setPotwierdzenie(null);
+                setWidok(w.id);
+              }}
+            >
+              <Text style={[s.zakladkaTekst, widok === w.id && s.zakladkaTekstAktywny]}>
+                {w.etykieta}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={s.nawigacja}>
+          <Pressable style={s.strzalka} onPress={() => przesun(-1)}>
+            <Text style={s.strzalkaTekst}>‹</Text>
+          </Pressable>
+
+          <View style={s.naglowekBlok}>
+            <Text style={s.naglowekTekst} numberOfLines={1}>
+              {naglowek}
+            </Text>
+            {laduje ? <ActivityIndicator size="small" color={C.tekstPrzygaszony} /> : null}
+          </View>
+
+          <Pressable
+            style={[s.strzalka, wPrzodZablokowane && s.strzalkaNieaktywna]}
+            onPress={() => przesun(1)}
+            disabled={wPrzodZablokowane}
+          >
+            <Text style={s.strzalkaTekst}>›</Text>
+          </Pressable>
+        </View>
+      </View>
+
       <ScrollView
         contentContainerStyle={s.zawartosc}
         refreshControl={
@@ -288,26 +285,51 @@ export default function App() {
           </View>
         ) : null}
 
-        <Pressable
-          style={({ pressed }) => [s.dodaj, pressed && s.przyciskWcisniety]}
-          onPress={() => {
-            setPotwierdzenie(null);
-            setDodawanie(true);
-          }}
-        >
-          <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
-        </Pressable>
+        {widok === 'dzien' ? (
+          <>
+            <Pressable
+              style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
+              onPress={() => {
+                setPotwierdzenie(null);
+                setDodawanie(true);
+              }}
+            >
+              <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
+            </Pressable>
 
-        {dane ? (
-          <EkranDnia dane={dane} />
-        ) : !blad ? (
-          <View style={s.ekranSrodek}>
+            {dzien ? <KartaDnia dane={dzien} /> : null}
+            {saldo ? <KartaSalda saldo={saldo} /> : null}
+          </>
+        ) : null}
+
+        {widok === 'tydzien' && tydzien ? (
+          <WykresTygodnia
+            zakres={tydzien}
+            dni={dniOkresu}
+            wybrany={null}
+            onWybierz={otworzDzien}
+          />
+        ) : null}
+
+        {widok === 'miesiac' && kursor ? (
+          <KalendarzMiesiaca
+            zakres={zakresMiesiaca(kursor)}
+            dni={dniOkresu}
+            wybrany={null}
+            onWybierz={otworzDzien}
+          />
+        ) : null}
+
+        {widok !== 'dzien' && okres ? <KartaOkresu dane={okres} /> : null}
+
+        {!blad && laduje && !dzien && widok === 'dzien' ? (
+          <View style={s.srodek}>
             <ActivityIndicator size="large" color={C.akcent} />
           </View>
         ) : null}
 
-        <Pressable style={s.przyciskTekstowy} onPress={rozlacz}>
-          <Text style={s.przyciskTekstowyTekst}>Zmień token</Text>
+        <Pressable style={s.linkTekstowy} onPress={rozlacz}>
+          <Text style={s.linkTekstowyTekst}>Zmień token</Text>
         </Pressable>
       </ScrollView>
 
@@ -315,15 +337,20 @@ export default function App() {
         <DodajWpis
           widoczny={dodawanie}
           token={token}
-          dzisiaj={dane?.date ?? null}
+          dzisiaj={dzisiaj}
           onZamknij={() => setDodawanie(false)}
           onZapisano={(wynik: ZapisOdpowiedz) => {
             // Serwer odesłał świeży stan dnia razem z potwierdzeniem zapisu,
-            // więc odświeżamy kartę bez dodatkowego zapytania.
-            setDane(wynik.dzien);
+            // więc przeskakujemy na ten dzień bez dodatkowego zapytania.
+            setDzien(wynik.dzien);
+            setKursor(wynik.dzien.date);
+            setWidok('dzien');
             setBlad(null);
             setPotwierdzenie(wynik.ostrzezenie ?? 'Zapisano.');
             setDodawanie(false);
+            getSaldo(token)
+              .then(setSaldo)
+              .catch(() => {});
           }}
         />
       ) : null}
@@ -331,80 +358,48 @@ export default function App() {
   );
 }
 
-/* ========================================================================== */
-
 const s = StyleSheet.create({
   tlo: { flex: 1, backgroundColor: C.tlo },
-  zawartosc: { padding: 16, paddingTop: 56, paddingBottom: 40 },
-  ekranSrodek: { flex: 1, justifyContent: 'center', padding: 24 },
+  srodek: { justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
+  zawartosc: { padding: 16, paddingBottom: 40 },
 
-  tytulDuzy: { color: C.tekst, fontSize: 32, fontWeight: '700', textAlign: 'center' },
-  podtytul: {
-    color: C.tekstPrzygaszony,
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 28,
-  },
+  gora: { paddingTop: 52, paddingHorizontal: 16, paddingBottom: 8 },
 
-  pole: {
+  zakladki: {
+    flexDirection: 'row',
     backgroundColor: C.karta,
-    borderColor: C.obramowanie,
+    borderRadius: 12,
+    padding: 4,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: C.tekst,
-    fontSize: 16,
+    borderColor: C.obramowanie,
   },
+  zakladka: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center' },
+  zakladkaAktywna: { backgroundColor: C.akcent },
+  zakladkaTekst: { color: C.tekstPrzygaszony, fontSize: 14, fontWeight: '600' },
+  zakladkaTekstAktywny: { color: C.tlo, fontWeight: '700' },
 
-  przycisk: {
+  nawigacja: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  strzalka: { paddingHorizontal: 14, paddingVertical: 4 },
+  strzalkaNieaktywna: { opacity: 0.25 },
+  strzalkaTekst: { color: C.tekst, fontSize: 30, lineHeight: 34 },
+  naglowekBlok: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  naglowekTekst: { color: C.tekst, fontSize: 16, fontWeight: '600', textAlign: 'center' },
+
+  dodaj: {
     backgroundColor: C.akcent,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
-    marginTop: 16,
-  },
-  przyciskWcisniety: { opacity: 0.75 },
-  przyciskNieaktywny: { opacity: 0.5 },
-  przyciskTekst: { color: C.tlo, fontSize: 16, fontWeight: '700' },
-
-  stopka: { color: C.tekstPrzygaszony, fontSize: 12, textAlign: 'center', marginTop: 24 },
-
-  data: {
-    color: C.tekstPrzygaszony,
-    fontSize: 15,
-    marginBottom: 16,
-  },
-
-  karta: {
-    backgroundColor: C.karta,
-    borderColor: C.obramowanie,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 16,
     marginBottom: 12,
   },
-  naglowekSekcji: {
-    color: C.tekstPrzygaszony,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    marginBottom: 12,
-  },
-
-  wiersz: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    paddingVertical: 5,
-  },
-  etykieta: { color: C.tekstPrzygaszony, fontSize: 14 },
-  wartosc: { color: C.tekst, fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  wartoscDuza: { fontSize: 22, fontWeight: '700' },
-
-  kreska: { height: 1, backgroundColor: C.obramowanie, marginVertical: 8 },
-  przypis: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 10, lineHeight: 15 },
+  wcisniety: { opacity: 0.75 },
+  dodajTekst: { color: C.tlo, fontSize: 16, fontWeight: '700' },
 
   pasekBledu: {
     backgroundColor: '#2a1a1a',
@@ -427,17 +422,6 @@ const s = StyleSheet.create({
   },
   pasekOkTekst: { color: C.akcent, fontSize: 14, fontWeight: '600' },
 
-  dodaj: {
-    backgroundColor: C.akcent,
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  dodajTekst: { color: C.tlo, fontSize: 16, fontWeight: '700' },
-
-  blad: { color: C.blad, fontSize: 13, marginTop: 12, textAlign: 'center' },
-
-  przyciskTekstowy: { alignItems: 'center', paddingVertical: 18, marginTop: 4 },
-  przyciskTekstowyTekst: { color: C.tekstPrzygaszony, fontSize: 13 },
+  linkTekstowy: { alignItems: 'center', paddingVertical: 18, marginTop: 4 },
+  linkTekstowyTekst: { color: C.tekstPrzygaszony, fontSize: 13 },
 });
