@@ -77,3 +77,50 @@ export interface Saldo {
   transactionCount: number;
   lastDate: string | null;
 }
+
+/** Postęp celu zarobkowego — wszystko policzone po stronie serwera. */
+export interface TargetProgress {
+  periodType: 'MONTHLY' | 'WEEKLY';
+  targetAmount: number;
+  currentNetto: number;
+  remainingNetto: number;
+  progressPercent: number;
+  daysRemaining: number;
+  dailyRequiredNetto: number;
+  avgHourlyRate: number;
+  /** `true` = brak własnej historii godzin, użyto stawki domyślnej z CFG. */
+  usedFallbackRate: boolean;
+  estimatedHoursRemaining: number;
+  hoursPerDayRequired: number;
+  isCompleted: boolean;
+}
+
+export interface Cele {
+  miesiac: TargetProgress | null;
+  tydzien: TargetProgress | null;
+}
+
+/**
+ * Pojedyncza oferta kursu zapisana przez bota ze zrzutu ekranu.
+ *
+ * `rateBasis` mówi, SKĄD wzięty jest dystans do stawki: `'APP'` (odczyt z ekranu
+ * Glovo — podstawa, §8f), `'MAPS'` (kontrola dojazdu) albo `'NONE'`, gdy adres
+ * nie dał się zgeokodować. Przy `'NONE'` `netRatePerKm` nie znaczy nic i nie
+ * wolno go wliczać do średniej.
+ */
+export interface CourseOfferItem {
+  id: number;
+  date: string;
+  time: string;
+  grossAmount: number;
+  netAmount: number;
+  appTotalKm: number | null;
+  mapsTotalKm: number | null;
+  distanceTotalKm: number;
+  rateBasis: string;
+  netRatePerKm: number;
+  isProfitable: boolean;
+  status: string;
+  pickupAddress: string | null;
+  deliveryAddress: string | null;
+}

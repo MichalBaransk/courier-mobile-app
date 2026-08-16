@@ -12,11 +12,15 @@ import { StatusBar } from 'expo-status-bar';
 
 import {
   ApiError,
+  getCele,
   getDni,
   getDzien,
+  getInfo,
+  getOferty,
   getOkres,
   getSaldo,
   getToday,
+  type UsunOdpowiedz,
   type ZapisOdpowiedz,
 } from './src/api';
 import { clearToken, readToken } from './src/storage';
@@ -31,11 +35,26 @@ import {
 import { DodajWpis } from './src/DodajWpis';
 import { EkranTokena } from './src/EkranTokena';
 import { KartaDnia, KartaOkresu, KartaSalda, SzczegolyTygodnia } from './src/Karty';
+import { KartaCelu, UstawCel } from './src/Cele';
+import { KartaOfert } from './src/Oferty';
+import { KartaAnalizyDnia, PorownanieOkresow } from './src/Analiza';
+import { UsunWpisy } from './src/UsunWpisy';
 import { KalendarzMiesiaca } from './src/Wykresy';
 import { C } from './src/theme';
-import type { DailySummary, DailyTotals, PeriodSummary, Saldo } from './src/types';
+import type {
+  ApiInfo,
+  Cele,
+  CourseOfferItem,
+  DailySummary,
+  DailyTotals,
+  PeriodSummary,
+  Saldo,
+} from './src/types';
 
 type Stan = 'wczytywanie' | 'brakTokena' | 'gotowe';
+
+/** Ile dni wstecz stanowi tło do oceny pojedynczego dnia i kosztu paliwa na km. */
+const OKNO_ODNIESIENIA_DNI = 30;
 
 /**
  * JEDEN EKRAN zamiast trzech zakładek.
@@ -62,13 +81,23 @@ export default function App() {
   const [dzien, setDzien] = useState<DailySummary | null>(null);
   const [dniMiesiaca, setDniMiesiaca] = useState<DailyTotals[]>([]);
   const [okres, setOkres] = useState<PeriodSummary | null>(null);
+  const [okresPoprzedni, setOkresPoprzedni] = useState<PeriodSummary | null>(null);
+  const [oferty, setOferty] = useState<CourseOfferItem[]>([]);
   const [saldo, setSaldo] = useState<Saldo | null>(null);
+  const [cele, setCele] = useState<Cele | null>(null);
+  const [info, setInfo] = useState<ApiInfo | null>(null);
+  /** Ostatnie 30 dni — tło pod analizę dnia i szacunek paliwa na kilometr. */
+  const [odniesienie, setOdniesienie] = useState<PeriodSummary | null>(null);
 
   const [blad, setBlad] = useState<string | null>(null);
   const [laduje, setLaduje] = useState(false);
   const [odswiezam, setOdswiezam] = useState(false);
   const [dodawanie, setDodawanie] = useState(false);
+  const [kasowanie, setKasowanie] = useState(false);
   const [potwierdzenie, setPotwierdzenie] = useState<string | null>(null);
+  /** Który cel jest właśnie ustawiany; `null` = modal zamknięty. */
+  const [celDoUstawienia, setCelDoUstawienia] = useState<'MONTHLY' | 'WEEKLY' | null>(null);
+  const [kwotaCelu, setKwotaCelu] = useState<number | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -111,18 +140,66 @@ export default function App() {
     })();
   }, [stan, token, dzisiaj, obsluzBlad]);
 
-  const pobierzMiesiac = useCallback(
-    async (t: string, wMiesiacu: string) => {
-      const zakres = zakresMiesiaca(wMiesiacu);
-      const [dni, podsumowanie] = await Promise.all([
-        getDni(t, zakres.od, zakres.do),
-        getOkres(t, zakres.od, zakres.do),
-      ]);
-      setDniMiesiaca(dni);
-      setOkres(podsumowanie);
-    },
-    []
-  );
+  /**
+   * Cele i metadane API.
+   *
+   * Osobno od danych miesiąca, bo nie zależą od tego, który miesiąc jest
+   * oglądany: serwer liczy postęp WYŁĄCZNIE dla bieżącego okresu
+   * (`getEffectiveDate` w `getTargetProgress`). Przewijanie kalendarza do
+   * marca nie ma prawa zmienić paska postępu na sierpień.
+   *
+   * Błąd tutaj nie jest pokazywany jako awaria całego ekranu — brak celu to
+   * normalny stan, a brak `/info` odbiera tylko podpis pod listą ofert.
+   */
+  const pobierzCele = useCallback((t: string) => {
+    getCele(t)
+      .then(setCele)
+      .catch(() => setCele(null));
+  }, []);
+
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token) return;
+    pobierzCele(token);
+    getInfo(token)
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, [stan, token, pobierzCele]);
+
+  /** Okno odniesienia liczone od daty SERWERA, nie od zegara telefonu. */
+  const pobierzOdniesienie = useCallback((t: string, dzien: string) => {
+    getOkres(t, przesunDate(dzien, -(OKNO_ODNIESIENIA_DNI - 1)), dzien)
+      .then(setOdniesienie)
+      .catch(() => setOdniesienie(null));
+  }, []);
+
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token || dzisiaj === null) return;
+    pobierzOdniesienie(token, dzisiaj);
+  }, [stan, token, dzisiaj, pobierzOdniesienie]);
+
+  /**
+   * Wszystko, co zależy od oglądanego miesiąca — jednym strzałem.
+   *
+   * Cztery żądania równolegle zamiast po kolei: sumy dzienne pod kalendarz,
+   * podsumowanie miesiąca, oferty (jedno wywołanie na cały miesiąc, filtrowane
+   * potem w pamięci) i miesiąc poprzedni pod porównanie.
+   */
+  const pobierzMiesiac = useCallback(async (t: string, wMiesiacu: string) => {
+    const zakres = zakresMiesiaca(wMiesiacu);
+    const poprzedni = zakresMiesiaca(przesunDate(zakres.od, -1));
+
+    const [dni, podsumowanie, listaOfert, wczesniej] = await Promise.all([
+      getDni(t, zakres.od, zakres.do),
+      getOkres(t, zakres.od, zakres.do),
+      getOferty(t, zakres.od, zakres.do).catch(() => [] as CourseOfferItem[]),
+      getOkres(t, poprzedni.od, poprzedni.do).catch(() => null),
+    ]);
+
+    setDniMiesiaca(dni);
+    setOkres(podsumowanie);
+    setOferty(listaOfert);
+    setOkresPoprzedni(wczesniej);
+  }, []);
 
   useEffect(() => {
     if (stan !== 'gotowe' || !token || miesiac === null) return;
@@ -177,12 +254,23 @@ export default function App() {
       await pobierzMiesiac(token, miesiac);
       if (wybranyDzien !== null) setDzien(await getDzien(token, wybranyDzien));
       setSaldo(await getSaldo(token));
+      pobierzCele(token);
+      if (dzisiaj !== null) pobierzOdniesienie(token, dzisiaj);
     } catch (err) {
       await obsluzBlad(err);
     } finally {
       setOdswiezam(false);
     }
-  }, [token, miesiac, wybranyDzien, pobierzMiesiac, obsluzBlad]);
+  }, [
+    token,
+    miesiac,
+    wybranyDzien,
+    dzisiaj,
+    pobierzMiesiac,
+    pobierzCele,
+    pobierzOdniesienie,
+    obsluzBlad,
+  ]);
 
   const rozlacz = useCallback(async () => {
     await clearToken();
@@ -192,6 +280,9 @@ export default function App() {
     setWybranyDzien(null);
     setWybranyTydzien(null);
     setDzien(null);
+    setCele(null);
+    setOferty([]);
+    setOdniesienie(null);
     setBlad(null);
     setStan('brakTokena');
   }, []);
@@ -207,6 +298,25 @@ export default function App() {
     setWybranyDzien(null);
     setWybranyTydzien((poprzedni) => (poprzedni === pn ? null : pn));
   }, []);
+
+  /** Wspólne odświeżenie po każdej zmianie danych — zapis albo kasowanie. */
+  const poZmianie = useCallback(
+    (nowyDzien: DailySummary, komunikat: string | null) => {
+      setDzien(nowyDzien);
+      setWybranyDzien(nowyDzien.date);
+      setWybranyTydzien(null);
+      setBlad(null);
+      setPotwierdzenie(komunikat);
+      if (!token) return;
+      if (miesiac !== null) void pobierzMiesiac(token, miesiac).catch(() => {});
+      getSaldo(token)
+        .then(setSaldo)
+        .catch(() => {});
+      pobierzCele(token);
+      if (dzisiaj !== null) pobierzOdniesienie(token, dzisiaj);
+    },
+    [token, miesiac, dzisiaj, pobierzMiesiac, pobierzCele, pobierzOdniesienie]
+  );
 
   if (stan === 'wczytywanie') {
     return (
@@ -233,6 +343,34 @@ export default function App() {
 
   const wPrzodZablokowany =
     miesiac !== null && dzisiaj !== null && zakresMiesiaca(miesiac).od >= zakresMiesiaca(dzisiaj).od;
+
+  /**
+   * Cele pokazujemy tylko przy oglądaniu BIEŻĄCEGO miesiąca.
+   *
+   * Serwer liczy postęp wyłącznie dla dzisiejszego okresu, więc przy marcu
+   * pasek pokazywałby sierpniowe liczby pod marcowym nagłówkiem. Lepiej nie
+   * pokazać nic, niż pokazać liczbę, która znaczy co innego, niż się wydaje.
+   */
+  const biezacyMiesiac =
+    miesiac !== null && dzisiaj !== null && zakresMiesiaca(miesiac).od === zakresMiesiaca(dzisiaj).od;
+
+  /** Zakres, z którego pokazujemy oferty — idzie za zaznaczeniem w kalendarzu. */
+  const ofertyWidoku =
+    wybranyDzien !== null
+      ? oferty.filter((o) => o.date === wybranyDzien)
+      : wybranyTydzien !== null
+        ? oferty.filter((o) => poniedzialek(o.date) === wybranyTydzien)
+        : oferty;
+
+  const etykietaOfert =
+    wybranyDzien !== null
+      ? `OFERTY — ${dataPoPolsku(wybranyDzien).toUpperCase()}`
+      : wybranyTydzien !== null
+        ? `OFERTY — TYDZIEŃ ${numerTygodniaISO(wybranyTydzien)}`
+        : 'OFERTY MIESIĄCA';
+
+  /** Dzień, którego dotyczy kasowanie: zaznaczony albo dzisiejszy. */
+  const dzienDoKasowania = wybranyDzien ?? dzisiaj;
 
   return (
     <View style={s.tlo}>
@@ -289,15 +427,27 @@ export default function App() {
           />
         ) : null}
 
-        <Pressable
-          style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
-          onPress={() => {
-            setPotwierdzenie(null);
-            setDodawanie(true);
-          }}
-        >
-          <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
-        </Pressable>
+        <View style={s.przyciski}>
+          <Pressable
+            style={({ pressed }) => [s.dodaj, pressed && s.wcisniety]}
+            onPress={() => {
+              setPotwierdzenie(null);
+              setDodawanie(true);
+            }}
+          >
+            <Text style={s.dodajTekst}>+  Dodaj wpis</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [s.usun, pressed && s.wcisniety]}
+            onPress={() => {
+              setPotwierdzenie(null);
+              setKasowanie(true);
+            }}
+          >
+            <Text style={s.usunTekst}>Usuń</Text>
+          </Pressable>
+        </View>
 
         {wybranyDzien !== null && dzien !== null && dzien.date === wybranyDzien ? (
           <>
@@ -308,6 +458,7 @@ export default function App() {
               </Pressable>
             </View>
             <KartaDnia dane={dzien} />
+            <KartaAnalizyDnia dzien={dzien} odniesienie={odniesienie} />
           </>
         ) : null}
 
@@ -320,7 +471,51 @@ export default function App() {
         ) : null}
 
         {wybranyDzien === null && wybranyTydzien === null && okres ? (
-          <KartaOkresu dane={okres} />
+          <>
+            <KartaOkresu dane={okres} />
+            {miesiac !== null ? (
+              <PorownanieOkresow
+                biezacy={okres}
+                poprzedni={okresPoprzedni}
+                etykietaBiezacy={nazwaMiesiaca(miesiac)}
+                etykietaPoprzedni={nazwaMiesiaca(przesunDate(zakresMiesiaca(miesiac).od, -1))}
+              />
+            ) : null}
+          </>
+        ) : null}
+
+        {/* Karta ofert znika, gdy w CAŁYM miesiącu nie ma ani jednej oceny —
+            pusta ramka na każdym ekranie byłaby tylko szumem. Przy dniu bez
+            ofert, ale w miesiącu, który je ma, zostaje i mówi „brak". */}
+        {oferty.length > 0 ? (
+          <KartaOfert
+            oferty={ofertyWidoku}
+            etykieta={etykietaOfert}
+            minStawka={info?.minStawkaNettoKm ?? null}
+          />
+        ) : null}
+
+        {biezacyMiesiac ? (
+          <>
+            <KartaCelu
+              postep={cele?.miesiac ?? null}
+              etykieta="CEL MIESIĘCZNY"
+              okres="MONTHLY"
+              onUstaw={(o, kwota) => {
+                setKwotaCelu(kwota);
+                setCelDoUstawienia(o);
+              }}
+            />
+            <KartaCelu
+              postep={cele?.tydzien ?? null}
+              etykieta="CEL TYGODNIOWY"
+              okres="WEEKLY"
+              onUstaw={(o, kwota) => {
+                setKwotaCelu(kwota);
+                setCelDoUstawienia(o);
+              }}
+            />
+          </>
         ) : null}
 
         {saldo ? <KartaSalda saldo={saldo} /> : null}
@@ -331,24 +526,44 @@ export default function App() {
       </ScrollView>
 
       {token ? (
-        <DodajWpis
-          widoczny={dodawanie}
-          token={token}
-          dzisiaj={dzisiaj}
-          onZamknij={() => setDodawanie(false)}
-          onZapisano={(wynik: ZapisOdpowiedz) => {
-            // Modal zostaje otwarty — zamyka go dopiero „Gotowe".
-            setDzien(wynik.dzien);
-            setWybranyDzien(wynik.dzien.date);
-            setWybranyTydzien(null);
-            setBlad(null);
-            setPotwierdzenie(wynik.ostrzezenie ?? 'Zapisano.');
-            if (miesiac !== null) void pobierzMiesiac(token, miesiac).catch(() => {});
-            getSaldo(token)
-              .then(setSaldo)
-              .catch(() => {});
-          }}
-        />
+        <>
+          <DodajWpis
+            widoczny={dodawanie}
+            token={token}
+            dzisiaj={dzisiaj}
+            onZamknij={() => setDodawanie(false)}
+            onZapisano={(wynik: ZapisOdpowiedz) => {
+              // Modal zostaje otwarty — zamyka go dopiero „Gotowe".
+              poZmianie(wynik.dzien, wynik.ostrzezenie ?? 'Zapisano.');
+            }}
+          />
+
+          <UsunWpisy
+            widoczny={kasowanie}
+            token={token}
+            data={dzienDoKasowania}
+            etykietaDnia={
+              dzienDoKasowania === null ? 'dzisiaj' : dataPoPolsku(dzienDoKasowania)
+            }
+            dzien={dzien !== null && dzien.date === dzienDoKasowania ? dzien : null}
+            onZamknij={() => setKasowanie(false)}
+            onUsunieto={(wynik: UsunOdpowiedz) => {
+              poZmianie(wynik.dzien, null);
+            }}
+          />
+
+          <UstawCel
+            widoczny={celDoUstawienia !== null}
+            token={token}
+            okres={celDoUstawienia ?? 'MONTHLY'}
+            kwotaStartowa={kwotaCelu}
+            onZamknij={() => setCelDoUstawienia(null)}
+            onZapisano={() => {
+              pobierzCele(token);
+              setPotwierdzenie('Cel zapisany.');
+            }}
+          />
+        </>
       ) : null}
     </View>
   );
@@ -399,15 +614,25 @@ const s = StyleSheet.create({
   },
   zamknijWybor: { color: C.tekstPrzygaszony, fontSize: 18, paddingHorizontal: 6 },
 
+  przyciski: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   dodaj: {
+    flex: 1,
     backgroundColor: C.akcent,
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
-    marginBottom: 14,
   },
   wcisniety: { opacity: 0.75 },
   dodajTekst: { color: C.tlo, fontSize: 16, fontWeight: '700' },
+  usun: {
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  usunTekst: { color: C.blad, fontSize: 15, fontWeight: '600' },
 
   pasekBledu: {
     backgroundColor: '#2a1a1a',

@@ -1,5 +1,14 @@
 import { API_BASE, REQUEST_TIMEOUT_MS } from './config';
-import type { ApiInfo, DailySummary, DailyTotals, PeriodSummary, Saldo } from './types';
+import type {
+  ApiInfo,
+  Cele,
+  CourseOfferItem,
+  DailySummary,
+  DailyTotals,
+  PeriodSummary,
+  Saldo,
+  TargetProgress,
+} from './types';
 
 /**
  * Klient REST API bota.
@@ -222,4 +231,48 @@ export async function postUsun(
   const dane = await request<UsunOdpowiedz>('/api/v1/usun', token, { cel, data });
   assertDailySummary(dane.dzien);
   return dane;
+}
+
+/* ========================================================================== */
+/*  Cele i oferty                                                             */
+/* ========================================================================== */
+
+export function getCele(token: string): Promise<Cele> {
+  return request<Cele>('/api/v1/cele', token);
+}
+
+export function postCel(
+  token: string,
+  okres: 'MONTHLY' | 'WEEKLY',
+  kwota: number
+): Promise<{ postep: TargetProgress | null }> {
+  return request<{ postep: TargetProgress | null }>('/api/v1/cel', token, { okres, kwota });
+}
+
+/**
+ * Serwer dopuszcza 500 (`MAX_OFFERS_LIMIT` w `routes.read.ts`). Biorę maksimum:
+ * ucięcie listy zafałszowałoby średnią stawkę i nie zostawiło po sobie śladu
+ * na ekranie.
+ */
+const MAKS_OFERT = 500;
+
+/**
+ * Oferty z zakresu — jedno żądanie na cały miesiąc.
+ *
+ * Statystyki pojedynczego dnia liczę z tej listy w `Oferty.tsx`, zamiast wołać
+ * `/api/v1/oferty/statystyki/:data` — miesiąc i tak przychodzi w komplecie pod
+ * kalendarz. Uwaga: średnia stawka liczona jest tam odrobinę inaczej niż na
+ * serwerze; różnica i jej powód są opisane w nagłówku `Oferty.tsx`.
+ * Endpoint zostaje po stronie serwera, bo używa go bot.
+ */
+export async function getOferty(
+  token: string,
+  od: string,
+  doDaty: string
+): Promise<CourseOfferItem[]> {
+  const dane = await request<{ items?: unknown }>(
+    `/api/v1/oferty?od=${od}&do=${doDaty}&limit=${MAKS_OFERT}`,
+    token
+  );
+  return Array.isArray(dane.items) ? (dane.items as CourseOfferItem[]) : [];
 }
