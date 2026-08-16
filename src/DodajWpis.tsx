@@ -21,6 +21,7 @@ import {
   postZmiana,
   type ZapisOdpowiedz,
 } from './api';
+import { krotkaData, poprawnaData, przesunDate } from './format';
 import { C } from './theme';
 
 /**
@@ -57,11 +58,17 @@ function liczba(tekst: string): number | null {
 interface Props {
   widoczny: boolean;
   token: string;
+  /**
+   * Dzisiejsza data WEDŁUG SERWERA (`dane.date` z ostatniej odpowiedzi).
+   * Punkt odniesienia dla „wczoraj" i „przedwczoraj". `null`, gdy karta dnia
+   * jeszcze się nie wczytała — wtedy zostaje tylko zapis na dzisiaj.
+   */
+  dzisiaj: string | null;
   onZamknij: () => void;
   onZapisano: (wynik: ZapisOdpowiedz) => void;
 }
 
-export function DodajWpis({ widoczny, token, onZamknij, onZapisano }: Props) {
+export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: Props) {
   const [rodzaj, setRodzaj] = useState<Rodzaj>('napiwek');
   const [kwota, setKwota] = useState('');
   const [litry, setLitry] = useState('');
@@ -70,6 +77,11 @@ export function DodajWpis({ widoczny, token, onZamknij, onZapisano }: Props) {
   const [doGodz, setDoGodz] = useState('');
   const [zapisuje, setZapisuje] = useState(false);
   const [blad, setBlad] = useState<string | null>(null);
+
+  /** `null` = dzisiaj, czyli data wyznaczona po stronie serwera. */
+  const [wybranaData, setWybranaData] = useState<string | null>(null);
+  const [trybInnej, setTrybInnej] = useState(false);
+  const [innaData, setInnaData] = useState('');
 
   const wyczysc = () => {
     setKwota('');
@@ -80,9 +92,17 @@ export function DodajWpis({ widoczny, token, onZamknij, onZapisano }: Props) {
     setBlad(null);
   };
 
+  /** Zamknięcie modalu resetuje też wybór dnia — inaczej „wczoraj" zostałoby na potem. */
+  const wyczyscWszystko = () => {
+    wyczysc();
+    setWybranaData(null);
+    setTrybInnej(false);
+    setInnaData('');
+  };
+
   const zamknij = () => {
     if (zapisuje) return;
-    wyczysc();
+    wyczyscWszystko();
     onZamknij();
   };
 
@@ -91,12 +111,25 @@ export function DodajWpis({ widoczny, token, onZamknij, onZapisano }: Props) {
    * `wartosc === null` zawęża typ i nie trzeba nigdzie rzutować przez `as`.
    */
   const zbudujZadanie = (): (() => Promise<ZapisOdpowiedz>) | string => {
+    // Data ustalana raz, wspólna dla wszystkich rodzajów wpisu.
+    let data: string | null = wybranaData;
+    if (trybInnej) {
+      const wpisana = innaData.trim();
+      if (!poprawnaData(wpisana)) return 'Data musi być w formacie RRRR-MM-DD i istnieć w kalendarzu.';
+      data = wpisana;
+    }
+
     if (rodzaj === 'zmiana') {
       const doWyslania = od.trim();
       const doZjazdu = doGodz.trim();
       if (doWyslania === '' && doZjazdu === '') return 'Podaj przynajmniej jedną godzinę.';
       return () =>
-        postZmiana(token, doWyslania === '' ? null : doWyslania, doZjazdu === '' ? null : doZjazdu);
+        postZmiana(
+          token,
+          doWyslania === '' ? null : doWyslania,
+          doZjazdu === '' ? null : doZjazdu,
+          data
+        );
     }
 
     const wartosc = liczba(kwota);
@@ -104,13 +137,13 @@ export function DodajWpis({ widoczny, token, onZamknij, onZapisano }: Props) {
 
     switch (rodzaj) {
       case 'napiwek':
-        return () => postNapiwek(token, wartosc);
+        return () => postNapiwek(token, wartosc, data);
       case 'dystans':
-        return () => postDystans(token, wartosc);
+        return () => postDystans(token, wartosc, data);
       case 'brutto':
-        return () => postBrutto(token, wartosc);
+        return () => postBrutto(token, wartosc, data);
       case 'paliwo':
-        return () => postPaliwo(token, wartosc, liczba(litry), liczba(cena));
+        return () => postPaliwo(token, wartosc, liczba(litry), liczba(cena), data);
     }
 
     // Nieosiągalne przy obecnym zestawie rodzajów — switch wyżej pokrywa
@@ -139,6 +172,18 @@ export function DodajWpis({ widoczny, token, onZamknij, onZapisano }: Props) {
       setZapisuje(false);
     }
   };
+
+  /**
+   * Trzy dni wstecz jako skróty. Liczone od daty SERWERA, nie od zegara
+   * telefonu — patrz komentarz przy `przesunDate`.
+   */
+  const dniWstecz =
+    dzisiaj === null
+      ? []
+      : [1, 2, 3].map((n) => {
+          const iso = przesunDate(dzisiaj, -n);
+          return { iso, etykieta: n === 1 ? 'Wczoraj' : krotkaData(iso) };
+        });
 
   const pole = (
     etykieta: string,
@@ -188,6 +233,59 @@ export function DodajWpis({ widoczny, token, onZamknij, onZapisano }: Props) {
               </Pressable>
             ))}
           </View>
+
+          <Text style={s.etykieta}>Dzień wpisu</Text>
+          <View style={s.chipy}>
+            <Pressable
+              style={[s.chipData, wybranaData === null && !trybInnej && s.chipAktywny]}
+              onPress={() => {
+                if (zapisuje) return;
+                setWybranaData(null);
+                setTrybInnej(false);
+                setBlad(null);
+              }}
+            >
+              <Text
+                style={[s.chipTekst, wybranaData === null && !trybInnej && s.chipTekstAktywny]}
+              >
+                Dzisiaj
+              </Text>
+            </Pressable>
+
+            {dniWstecz.map((d) => (
+              <Pressable
+                key={d.iso}
+                style={[s.chipData, wybranaData === d.iso && !trybInnej && s.chipAktywny]}
+                onPress={() => {
+                  if (zapisuje) return;
+                  setWybranaData(d.iso);
+                  setTrybInnej(false);
+                  setBlad(null);
+                }}
+              >
+                <Text
+                  style={[s.chipTekst, wybranaData === d.iso && !trybInnej && s.chipTekstAktywny]}
+                >
+                  {d.etykieta}
+                </Text>
+              </Pressable>
+            ))}
+
+            <Pressable
+              style={[s.chipData, trybInnej && s.chipAktywny]}
+              onPress={() => {
+                if (zapisuje) return;
+                setTrybInnej(true);
+                setBlad(null);
+              }}
+            >
+              <Text style={[s.chipTekst, trybInnej && s.chipTekstAktywny]}>Inna…</Text>
+            </Pressable>
+          </View>
+
+          {trybInnej
+            ? pole('Data wpisu', innaData, setInnaData, dzisiaj ?? '2026-08-16', false)
+            : null}
 
           {rodzaj === 'napiwek' ? pole('Kwota napiwku', kwota, setKwota, '5,50') : null}
           {rodzaj === 'dystans' ? pole('Przejechane dzisiaj', kwota, setKwota, '142,3') : null}
@@ -254,6 +352,14 @@ const s = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 9,
+  },
+  chipData: {
+    backgroundColor: C.karta,
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   chipAktywny: { backgroundColor: C.akcent, borderColor: C.akcent },
   chipTekst: { color: C.tekstPrzygaszony, fontSize: 14, fontWeight: '600' },

@@ -315,6 +315,7 @@ export default function App() {
         <DodajWpis
           widoczny={dodawanie}
           token={token}
+          dzisiaj={dane?.date ?? null}
           onZamknij={() => setDodawanie(false)}
           onZapisano={(wynik: ZapisOdpowiedz) => {
             // Serwer odesłał świeży stan dnia razem z potwierdzeniem zapisu,

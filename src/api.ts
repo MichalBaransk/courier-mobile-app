@@ -140,21 +140,32 @@ async function zapisz(path: string, token: string, cialo: unknown): Promise<Zapi
   return { dzien: w.dzien, ostrzezenie: typeof w.ostrzezenie === 'string' ? w.ostrzezenie : null };
 }
 
-export const postNapiwek = (token: string, kwota: number) =>
-  zapisz('/api/v1/napiwek', token, { kwota });
+/**
+ * `data` to `RRRR-MM-DD` albo `null`.
+ *
+ * `null` znaczy „dzisiaj wyznaczone PO STRONIE SERWERA" — bezpieczniejsze niż
+ * wysyłanie daty z zegara telefonu, który może mieć inną strefę.
+ */
+export const postNapiwek = (token: string, kwota: number, data: string | null) =>
+  zapisz('/api/v1/napiwek', token, { kwota, data });
 
 export const postPaliwo = (
   token: string,
   kwota: number,
   litry: number | null,
-  cenaZaLitr: number | null
-) => zapisz('/api/v1/paliwo', token, { kwota, litry, cenaZaLitr });
+  cenaZaLitr: number | null,
+  data: string | null
+) => zapisz('/api/v1/paliwo', token, { kwota, litry, cenaZaLitr, data });
 
-export const postDystans = (token: string, km: number) =>
-  zapisz('/api/v1/dystans', token, { km });
+export const postDystans = (token: string, km: number, data: string | null) =>
+  zapisz('/api/v1/dystans', token, { km, data });
 
-export const postBrutto = (token: string, kwota: number) =>
-  zapisz('/api/v1/brutto', token, { kwota });
+export const postBrutto = (token: string, kwota: number, data: string | null) =>
+  zapisz('/api/v1/brutto', token, { kwota, data });
 
-export const postZmiana = (token: string, od: string | null, doGodz: string | null) =>
-  zapisz('/api/v1/zmiana', token, { od, do: doGodz });
+export const postZmiana = (
+  token: string,
+  od: string | null,
+  doGodz: string | null,
+  data: string | null
+) => zapisz('/api/v1/zmiana', token, { od, do: doGodz, data });
