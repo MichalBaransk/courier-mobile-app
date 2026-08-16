@@ -25,13 +25,20 @@ import {
   etykietaTygodnia,
   nazwaMiesiaca,
   numerTygodniaISO,
+  poniedzialek,
   przyszloscZablokowana,
   zakresMiesiaca,
   zakresTygodnia,
 } from './src/okresy';
 import { DodajWpis } from './src/DodajWpis';
 import { EkranTokena } from './src/EkranTokena';
-import { KartaDnia, KartaOkresu, KartaSalda } from './src/Karty';
+import {
+  KartaDnia,
+  KartaOkresu,
+  KartaSalda,
+  SzczegolyDnia,
+  SzczegolyTygodnia,
+} from './src/Karty';
 import { KalendarzMiesiaca, WykresTygodnia } from './src/Wykresy';
 import { C } from './src/theme';
 import type { DailySummary, DailyTotals, PeriodSummary, Saldo } from './src/types';
@@ -69,6 +76,14 @@ export default function App() {
   const [odswiezam, setOdswiezam] = useState(false);
   const [dodawanie, setDodawanie] = useState(false);
   const [potwierdzenie, setPotwierdzenie] = useState<string | null>(null);
+
+  /**
+   * Zaznaczenie WEWNĄTRZ widoku okresowego — filtruje w miejscu, bez skakania
+   * do zakładki dnia. Przeskok był najbardziej uciążliwą rzeczą w poprzedniej
+   * wersji: żeby obejrzeć trzy dni tygodnia, trzeba było trzy razy wracać.
+   */
+  const [wybranyDzien, setWybranyDzien] = useState<string | null>(null);
+  const [wybranyTydzien, setWybranyTydzien] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -194,12 +209,25 @@ export default function App() {
     setStan('brakTokena');
   }, []);
 
-  /** Dotknięcie słupka albo dnia w kalendarzu przenosi do widoku dnia. */
-  const otworzDzien = useCallback((data: string) => {
+  /** Dotknięcie dnia zaznacza go W MIEJSCU. Drugie dotknięcie odznacza. */
+  const zaznaczDzien = useCallback((data: string) => {
     setPotwierdzenie(null);
-    setKursor(data);
-    setWidok('dzien');
+    setWybranyTydzien(null);
+    setWybranyDzien((poprzedni) => (poprzedni === data ? null : data));
   }, []);
+
+  /** Dotknięcie numeru tygodnia w kalendarzu — podsumowanie całego tygodnia. */
+  const zaznaczTydzien = useCallback((pn: string) => {
+    setPotwierdzenie(null);
+    setWybranyDzien(null);
+    setWybranyTydzien((poprzedni) => (poprzedni === pn ? null : pn));
+  }, []);
+
+  /** Zmiana okresu albo zakładki unieważnia zaznaczenie. */
+  useEffect(() => {
+    setWybranyDzien(null);
+    setWybranyTydzien(null);
+  }, [widok, kursor]);
 
   if (stan === 'wczytywanie') {
     return (
@@ -326,8 +354,8 @@ export default function App() {
           <WykresTygodnia
             zakres={tydzien}
             dni={dniOkresu}
-            wybrany={kursor}
-            onWybierz={otworzDzien}
+            wybrany={wybranyDzien}
+            onWybierz={zaznaczDzien}
           />
         ) : null}
 
@@ -335,12 +363,34 @@ export default function App() {
           <KalendarzMiesiaca
             zakres={zakresMiesiaca(kursor)}
             dni={dniOkresu}
-            wybrany={kursor}
-            onWybierz={otworzDzien}
+            wybrany={wybranyDzien}
+            wybranyTydzien={wybranyTydzien}
+            onWybierz={zaznaczDzien}
+            onWybierzTydzien={zaznaczTydzien}
           />
         ) : null}
 
-        {widok !== 'dzien' && okres ? <KartaOkresu dane={okres} /> : null}
+        {widok !== 'dzien' && wybranyDzien !== null ? (
+          <SzczegolyDnia
+            data={wybranyDzien}
+            dzien={dniOkresu.find((d) => d.date === wybranyDzien) ?? null}
+            onZamknij={() => setWybranyDzien(null)}
+          />
+        ) : null}
+
+        {widok === 'miesiac' && wybranyTydzien !== null ? (
+          <SzczegolyTygodnia
+            etykieta={`TYDZIEŃ ${numerTygodniaISO(wybranyTydzien)} · ${etykietaTygodnia(wybranyTydzien)}`}
+            dni={dniOkresu.filter((d) => poniedzialek(d.date) === wybranyTydzien)}
+            onZamknij={() => setWybranyTydzien(null)}
+          />
+        ) : null}
+
+        {/* Podsumowanie całego okresu chowamy, gdy coś jest zaznaczone —
+            dwie karty z liczbami obok siebie tylko mylą. */}
+        {widok !== 'dzien' && okres && wybranyDzien === null && wybranyTydzien === null ? (
+          <KartaOkresu dane={okres} />
+        ) : null}
 
         {!blad && laduje && !dzien && widok === 'dzien' ? (
           <View style={s.srodek}>
@@ -362,13 +412,14 @@ export default function App() {
           onZapisano={(wynik: ZapisOdpowiedz) => {
             // Serwer odesłał świeży stan dnia razem z potwierdzeniem zapisu,
             // więc przeskakujemy na ten dzień bez dodatkowego zapytania.
+            // Modal zostaje otwarty — zamyka go dopiero „Gotowe". Tu tylko
+            // odświeżamy to, co widać pod spodem, bez zmiany zakładki.
             setDzien(wynik.dzien);
-            setKursor(wynik.dzien.date);
-            setWidok('dzien');
-            setDniOkresu([]);
             setBlad(null);
             setPotwierdzenie(wynik.ostrzezenie ?? 'Zapisano.');
-            setDodawanie(false);
+            if (widok !== 'dzien' && kursor !== null && token !== null) {
+              void pobierz(token, widok, kursor);
+            }
             getSaldo(token)
               .then(setSaldo)
               .catch(() => {});

@@ -15,6 +15,7 @@ import {
 import {
   ApiError,
   postBrutto,
+  postUsun,
   postDystans,
   postNapiwek,
   postPaliwo,
@@ -41,12 +42,20 @@ import { C } from './theme';
 
 type Rodzaj = 'napiwek' | 'paliwo' | 'dystans' | 'brutto' | 'zmiana';
 
+/**
+ * Etykiety bez emoji.
+ *
+ * Na telefonie użytkownika trzy chipy — napiwek, dystans i test — pokazywały
+ * samą ikonę bez tekstu. Nie odtworzyłem tego u siebie, ale emoji w jednym
+ * `Text` razem z podpisem to jedyna rzecz, którą te trzy miały wspólną.
+ * Czysty tekst nie ma jak się zepsuć i czyta się lepiej.
+ */
 const RODZAJE: Array<{ id: Rodzaj; etykieta: string }> = [
-  { id: 'napiwek', etykieta: '💵 Napiwek' },
-  { id: 'dystans', etykieta: '🚗 Dystans' },
-  { id: 'brutto', etykieta: '💰 Brutto' },
-  { id: 'paliwo', etykieta: '⛽ Paliwo' },
-  { id: 'zmiana', etykieta: '⏱️ Zmiana' },
+  { id: 'napiwek', etykieta: 'Napiwek' },
+  { id: 'dystans', etykieta: 'Dystans' },
+  { id: 'brutto', etykieta: 'Brutto' },
+  { id: 'paliwo', etykieta: 'Paliwo' },
+  { id: 'zmiana', etykieta: 'Zmiana' },
 ];
 
 /** `12,50` i `12.50` znaczą to samo. Polska klawiatura daje przecinek. */
@@ -80,6 +89,16 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
   const [zapisuje, setZapisuje] = useState(false);
   const [blad, setBlad] = useState<string | null>(null);
 
+  /**
+   * Wpisy zapisane w TEJ sesji formularza. Modal nie zamyka się po zapisie —
+   * kurier wprowadza kilka rzeczy naraz i zamykanie okna po każdej z nich
+   * (a do tego przeskok do zakładki dnia) było najbardziej uciążliwą rzeczą
+   * w poprzedniej wersji.
+   */
+  const [wSesji, setWSesji] = useState<string[]>([]);
+  /** Kasowanie dnia wymaga drugiego dotknięcia — bez cofania. */
+  const [potwierdzKasowanie, setPotwierdzKasowanie] = useState(false);
+
   /** `null` = dzisiaj, czyli data wyznaczona po stronie serwera. */
   const [wybranaData, setWybranaData] = useState<string | null>(null);
   const [kalendarz, setKalendarz] = useState(false);
@@ -98,6 +117,8 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
     wyczysc();
     setWybranaData(null);
     setKalendarz(false);
+    setWSesji([]);
+    setPotwierdzKasowanie(false);
   };
 
   const zamknij = () => {
@@ -159,10 +180,41 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
     setZapisuje(true);
     try {
       const wynik = await zadanie();
+      setWSesji((lista) => [...lista, opisWpisu()]);
       wyczysc();
       onZapisano(wynik);
     } catch (err) {
       setBlad(err instanceof ApiError ? err.message : 'Nie udało się zapisać.');
+    } finally {
+      setZapisuje(false);
+    }
+  };
+
+  /** Krótki opis tego, co właśnie poszło — do listy „zapisane w tej sesji". */
+  const opisWpisu = (): string => {
+    if (rodzaj === 'zmiana') return `zmiana ${od.trim() || '…'}–${doGodz.trim() || '…'}`;
+    const w = kwota.trim();
+    if (rodzaj === 'napiwek') return `napiwek ${w} zł`;
+    if (rodzaj === 'dystans') return `dystans ${w} km`;
+    if (rodzaj === 'brutto') return `brutto ${w} zł`;
+    return `paliwo ${w} zł`;
+  };
+
+  const usunDzien = async () => {
+    if (!potwierdzKasowanie) {
+      setPotwierdzKasowanie(true);
+      return;
+    }
+    setZapisuje(true);
+    setBlad(null);
+    try {
+      const wynik = await postUsun(token, 'ALL_DAY', wybranaData);
+      setWSesji([]);
+      setPotwierdzKasowanie(false);
+      wyczysc();
+      onZapisano({ dzien: wynik.dzien, ostrzezenie: wynik.komunikat });
+    } catch (err) {
+      setBlad(err instanceof ApiError ? err.message : 'Nie udało się usunąć.');
     } finally {
       setZapisuje(false);
     }
@@ -233,7 +285,7 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
                   setBlad(null);
                 }}
               >
-                <Text style={[s.chipTekst, rodzaj === r.id && s.chipTekstAktywny]}>
+                <Text numberOfLines={1} style={[s.chipTekst, rodzaj === r.id && s.chipTekstAktywny]}>
                   {r.etykieta}
                 </Text>
               </Pressable>
@@ -280,7 +332,7 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
               }}
             >
               <Text style={[s.chipTekst, wybranaData === DATA_TESTOWA && s.chipTekstAktywny]}>
-                🧪 Test
+                Test
               </Text>
             </Pressable>
 
@@ -294,7 +346,7 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
               }}
             >
               <Text style={[s.chipTekst, dataZKalendarza !== null && s.chipTekstAktywny]}>
-                {dataZKalendarza === null ? '📅 Inna…' : `📅 ${krotkaData(dataZKalendarza)}`}
+                {dataZKalendarza === null ? 'Inna…' : krotkaData(dataZKalendarza)}
               </Text>
             </Pressable>
           </View>
@@ -341,8 +393,35 @@ export function DodajWpis({ widoczny, token, dzisiaj, onZamknij, onZapisano }: P
             )}
           </Pressable>
 
-          <Pressable style={s.anuluj} onPress={zamknij} disabled={zapisuje}>
-            <Text style={s.anulujTekst}>Anuluj</Text>
+          {wSesji.length > 0 ? (
+            <View style={s.sesja}>
+              <Text style={s.sesjaNaglowek}>Zapisane w tej sesji ({wSesji.length})</Text>
+              {wSesji.map((opis, i) => (
+                <Text key={`${opis}-${i}`} style={s.sesjaPozycja}>
+                  • {opis}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          <Pressable
+            style={({ pressed }) => [s.gotowe, pressed && s.wcisniety]}
+            onPress={zamknij}
+            disabled={zapisuje}
+          >
+            <Text style={s.gotoweTekst}>Gotowe — zamknij</Text>
+          </Pressable>
+
+          <Pressable
+            style={[s.usun, potwierdzKasowanie && s.usunPotwierdzenie]}
+            onPress={usunDzien}
+            disabled={zapisuje}
+          >
+            <Text style={[s.usunTekst, potwierdzKasowanie && s.usunTekstPotwierdzenie]}>
+              {potwierdzKasowanie
+                ? 'Na pewno? Dotknij ponownie, żeby usunąć'
+                : 'Usuń wszystkie wpisy z tego dnia'}
+            </Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -418,6 +497,34 @@ const s = StyleSheet.create({
   nieaktywny: { opacity: 0.5 },
   zapiszTekst: { color: C.tlo, fontSize: 17, fontWeight: '700' },
 
-  anuluj: { alignItems: 'center', paddingVertical: 18 },
-  anulujTekst: { color: C.tekstPrzygaszony, fontSize: 14 },
+  sesja: {
+    backgroundColor: C.tlo,
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 14,
+  },
+  sesjaNaglowek: { color: C.akcent, fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  sesjaPozycja: { color: C.tekstPrzygaszony, fontSize: 13, lineHeight: 19 },
+
+  gotowe: {
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  gotoweTekst: { color: C.tekst, fontSize: 15, fontWeight: '600' },
+
+  usun: { alignItems: 'center', paddingVertical: 16, marginTop: 6 },
+  usunPotwierdzenie: {
+    backgroundColor: '#2a1a1a',
+    borderColor: C.blad,
+    borderWidth: 1,
+    borderRadius: 12,
+  },
+  usunTekst: { color: C.blad, fontSize: 13 },
+  usunTekstPotwierdzenie: { fontWeight: '700' },
 });

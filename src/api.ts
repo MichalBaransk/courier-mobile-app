@@ -197,3 +197,29 @@ export function getOkres(token: string, od: string, doDaty: string): Promise<Per
 export function getSaldo(token: string): Promise<Saldo> {
   return request<Saldo>('/api/v1/saldo', token);
 }
+
+/** Zakresy kasowania — te same, które bot obsługuje głosem. */
+export type ZakresUsuniecia =
+  | 'LAST_TIP'
+  | 'ALL_TIPS'
+  | 'FUEL'
+  | 'HOURS'
+  | 'EARNINGS'
+  | 'DISTANCE'
+  | 'ALL_DAY';
+
+export interface UsunOdpowiedz {
+  usuniete: boolean;
+  komunikat: string;
+  dzien: DailySummary;
+}
+
+export async function postUsun(
+  token: string,
+  cel: ZakresUsuniecia,
+  data: string | null
+): Promise<UsunOdpowiedz> {
+  const dane = await request<UsunOdpowiedz>('/api/v1/usun', token, { cel, data });
+  assertDailySummary(dane.dzien);
+  return dane;
+}

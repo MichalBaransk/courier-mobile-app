@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { godziny, km, litry, zl, zlZeZnakiem } from './format';
+import { dataPoPolsku, godziny, km, litry, zl, zlZeZnakiem } from './format';
 import { C } from './theme';
-import type { DailySummary, PeriodSummary, Saldo } from './types';
+import type { DailySummary, DailyTotals, PeriodSummary, Saldo } from './types';
 
 /**
  * Karty prezentacyjne — czyste funkcje danych, bez pobierania i bez stanu.
@@ -95,6 +95,102 @@ export function KartaDnia({ dane }: { dane: DailySummary }) {
 }
 
 /* ========================================================================== */
+/*  Szczegóły dnia W MIEJSCU — bez opuszczania widoku tygodnia/miesiąca       */
+/* ========================================================================== */
+
+/**
+ * Zbudowana z `DailyTotals`, które i tak mamy z `/api/v1/dni`.
+ *
+ * Świadomie NIE pobieramy pełnego `/dzien/:data`: filtrowanie wykresu ma być
+ * natychmiastowe, a wypłaty z portfela i tak nie zmieszczą się w tej karcie.
+ */
+export function SzczegolyDnia({
+  dzien,
+  data,
+  onZamknij,
+}: {
+  dzien: DailyTotals | null;
+  data: string;
+  onZamknij: () => void;
+}) {
+  return (
+    <View style={s.karta}>
+      <View style={s.naglowekZKrzyzykiem}>
+        <Text style={s.naglowekSekcji}>{dataNaglowek(data)}</Text>
+        <Text style={s.zamknij} onPress={onZamknij}>
+          ✕
+        </Text>
+      </View>
+
+      {dzien === null ? (
+        <Text style={s.przypis}>Brak wpisów tego dnia.</Text>
+      ) : (
+        <>
+          <Wiersz etykieta="Brutto" wartosc={zl(dzien.grossEarnings)} />
+          <Wiersz etykieta="Napiwki" wartosc={zl(dzien.cashTipsTotal)} />
+          <Wiersz etykieta="Razem netto" wartosc={zl(dzien.totalNetto)} kolor={C.akcent} duzy />
+          <View style={s.kreska} />
+          <Wiersz
+            etykieta="Czas pracy"
+            wartosc={dzien.workHours > 0 ? godziny(dzien.workHours) : '—'}
+          />
+          <Wiersz etykieta="Dystans" wartosc={dzien.distanceKm > 0 ? km(dzien.distanceKm) : '—'} />
+          <Wiersz etykieta="Paliwo" wartosc={zl(dzien.fuelCost)} />
+        </>
+      )}
+    </View>
+  );
+}
+
+/** Podsumowanie zaznaczonego tygodnia, liczone z danych, które już mamy. */
+export function SzczegolyTygodnia({
+  dni,
+  etykieta,
+  onZamknij,
+}: {
+  dni: DailyTotals[];
+  etykieta: string;
+  onZamknij: () => void;
+}) {
+  const suma = dni.reduce(
+    (a, d) => ({
+      brutto: a.brutto + d.grossEarnings,
+      napiwki: a.napiwki + d.cashTipsTotal,
+      netto: a.netto + d.totalNetto,
+      godziny: a.godziny + d.workHours,
+      dystans: a.dystans + d.distanceKm,
+      paliwo: a.paliwo + d.fuelCost,
+    }),
+    { brutto: 0, napiwki: 0, netto: 0, godziny: 0, dystans: 0, paliwo: 0 }
+  );
+
+  return (
+    <View style={s.karta}>
+      <View style={s.naglowekZKrzyzykiem}>
+        <Text style={s.naglowekSekcji}>{etykieta}</Text>
+        <Text style={s.zamknij} onPress={onZamknij}>
+          ✕
+        </Text>
+      </View>
+
+      <Wiersz etykieta="Brutto" wartosc={zl(suma.brutto)} />
+      <Wiersz etykieta="Napiwki" wartosc={zl(suma.napiwki)} />
+      <Wiersz etykieta="Razem netto" wartosc={zl(suma.netto)} kolor={C.akcent} duzy />
+      <View style={s.kreska} />
+      <Wiersz etykieta="Czas pracy" wartosc={suma.godziny > 0 ? godziny(suma.godziny) : '—'} />
+      <Wiersz etykieta="Dystans" wartosc={suma.dystans > 0 ? km(suma.dystans) : '—'} />
+      <Wiersz etykieta="Paliwo" wartosc={zl(suma.paliwo)} />
+      <Wiersz
+        etykieta="Netto po paliwie"
+        wartosc={zl(suma.netto - suma.paliwo)}
+        kolor={C.ostrzezenie}
+      />
+      <Text style={s.przypis}>{dni.length} dni z wpisami.</Text>
+    </View>
+  );
+}
+
+/* ========================================================================== */
 /*  Okres                                                                     */
 /* ========================================================================== */
 
@@ -173,7 +269,18 @@ export function KartaSalda({ saldo }: { saldo: Saldo }) {
 
 /* ========================================================================== */
 
+/** `2026-08-16` → `Niedziela, 16 sierpnia` — nagłówek karty szczegółów. */
+function dataNaglowek(iso: string): string {
+  return dataPoPolsku(iso).toUpperCase();
+}
+
 const s = StyleSheet.create({
+  naglowekZKrzyzykiem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  zamknij: { color: C.tekstPrzygaszony, fontSize: 18, paddingHorizontal: 6, paddingBottom: 8 },
   karta: {
     backgroundColor: C.karta,
     borderColor: C.obramowanie,

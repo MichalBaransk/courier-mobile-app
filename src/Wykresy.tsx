@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { zl } from './format';
-import { dniZakresu, dzienTygodnia, type Zakres } from './okresy';
+import { dniZakresu, dzienTygodnia, numerTygodniaISO, poniedzialek, type Zakres } from './okresy';
 import { C } from './theme';
 import type { DailyTotals } from './types';
 
@@ -82,12 +82,17 @@ export function KalendarzMiesiaca({
   zakres,
   dni,
   wybrany,
+  wybranyTydzien,
   onWybierz,
+  onWybierzTydzien,
 }: {
   zakres: Zakres;
   dni: DailyTotals[];
   wybrany: string | null;
+  /** Poniedziałek zaznaczonego tygodnia albo `null`. */
+  wybranyTydzien: string | null;
   onWybierz: (data: string) => void;
+  onWybierzTydzien: (poniedzialek: string) => void;
 }) {
   const mapa = poDacie(dni);
   const daty = dniZakresu(zakres);
@@ -97,48 +102,75 @@ export function KalendarzMiesiaca({
   const przesuniecie = dzienTygodnia(zakres.od) - 1;
   const komorki: Array<string | null> = [...Array<null>(przesuniecie).fill(null), ...daty];
 
+  // Dopełniamy do pełnych siódemek, żeby ostatni wiersz nie rozjechał kolumn.
+  while (komorki.length % 7 !== 0) komorki.push(null);
+  const tygodnie: Array<Array<string | null>> = [];
+  for (let i = 0; i < komorki.length; i += 7) tygodnie.push(komorki.slice(i, i + 7));
+
   return (
     <View style={s.karta}>
       <Text style={s.naglowek}>KALENDARZ — IM JAŚNIEJ, TYM WIĘCEJ</Text>
 
-      <View style={s.siatka}>
-        {DNI_SKROT.map((d) => (
-          <Text key={d} style={s.naglowekKolumny}>
-            {d}
-          </Text>
-        ))}
+      <View style={s.wiersze}>
+        <View style={s.wiersz}>
+          <Text style={s.gutterNaglowek}>tyg</Text>
+          {DNI_SKROT.map((d) => (
+            <Text key={d} style={s.naglowekKolumny}>
+              {d}
+            </Text>
+          ))}
+        </View>
 
-        {komorki.map((data, i) => {
-          if (data === null) return <View key={`pusto-${i}`} style={s.komorka} />;
-
-          const netto = mapa.get(data)?.totalNetto ?? 0;
-          const intensywnosc = netto > 0 ? 0.18 + 0.82 * (netto / maks) : 0;
-          const numer = Number(data.slice(8, 10));
-
+        {tygodnie.map((tydzien) => {
+          const pn = poniedzialek(tydzien.find((d): d is string => d !== null) ?? zakres.od);
           return (
-            <Pressable
-              key={data}
-              style={[s.komorka, wybrany === data && s.komorkaWybrana]}
-              onPress={() => onWybierz(data)}
-            >
-              <View
-                style={[
-                  s.wypelnienie,
-                  netto > 0
-                    ? { backgroundColor: C.akcent, opacity: intensywnosc }
-                    : { backgroundColor: C.obramowanie },
-                ]}
-              />
-              <Text style={[s.numerDnia, netto > 0 && intensywnosc > 0.55 && s.numerNaJasnym]}>
-                {numer}
-              </Text>
-            </Pressable>
+            <View key={pn} style={s.wiersz}>
+              <Pressable
+                style={[s.gutter, wybranyTydzien === pn && s.gutterWybrany]}
+                onPress={() => onWybierzTydzien(pn)}
+              >
+                <Text
+                  style={[s.gutterTekst, wybranyTydzien === pn && s.gutterTekstWybrany]}
+                >
+                  {numerTygodniaISO(pn)}
+                </Text>
+              </Pressable>
+
+              {tydzien.map((data, i) => {
+                if (data === null) return <View key={`pusto-${pn}-${i}`} style={s.komorka} />;
+
+                const netto = mapa.get(data)?.totalNetto ?? 0;
+                const intensywnosc = netto > 0 ? 0.18 + 0.82 * (netto / maks) : 0;
+
+                return (
+                  <Pressable
+                    key={data}
+                    style={[s.komorka, wybrany === data && s.komorkaWybrana]}
+                    onPress={() => onWybierz(data)}
+                  >
+                    <View
+                      style={[
+                        s.wypelnienie,
+                        netto > 0
+                          ? { backgroundColor: C.akcent, opacity: intensywnosc }
+                          : { backgroundColor: C.obramowanie },
+                      ]}
+                    />
+                    <Text
+                      style={[s.numerDnia, netto > 0 && intensywnosc > 0.55 && s.numerNaJasnym]}
+                    >
+                      {Number(data.slice(8, 10))}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           );
         })}
       </View>
 
       <Text style={s.stopkaKalendarza}>
-        Najlepszy dzień: {zl(maks)}. Dotknij dnia, żeby zobaczyć szczegóły.
+        Najlepszy dzień: {zl(maks)}. Dotknij dnia — albo numeru tygodnia po lewej.
       </Text>
     </View>
   );
@@ -179,16 +211,34 @@ const s = StyleSheet.create({
   podpisDnia: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 6 },
   podpisAktywny: { color: C.tekst, fontWeight: '700' },
 
-  siatka: { flexDirection: 'row', flexWrap: 'wrap' },
+  wiersze: {},
+  wiersz: { flexDirection: 'row', alignItems: 'center' },
+  gutterNaglowek: {
+    width: 26,
+    textAlign: 'center',
+    color: C.tekstPrzygaszony,
+    fontSize: 9,
+    marginBottom: 6,
+  },
+  gutter: {
+    width: 26,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+  },
+  gutterWybrany: { backgroundColor: C.obramowanie },
+  gutterTekst: { color: C.tekstPrzygaszony, fontSize: 10, fontWeight: '600' },
+  gutterTekstWybrany: { color: C.tekst },
   naglowekKolumny: {
-    width: `${100 / 7}%`,
+    flex: 1,
     textAlign: 'center',
     color: C.tekstPrzygaszony,
     fontSize: 10,
     marginBottom: 6,
   },
   komorka: {
-    width: `${100 / 7}%`,
+    flex: 1,
     aspectRatio: 1,
     padding: 2,
     alignItems: 'center',
