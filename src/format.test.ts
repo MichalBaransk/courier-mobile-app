@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   dataPoPolsku,
   godziny,
+  godzinyLubMinuty,
   km,
   krotkaData,
   litry,
@@ -158,6 +159,41 @@ describe('formatowanie liczb — przecinek i żadnego NaN', () => {
     expect(zl(null)).toBe('—');
     expect(km(null)).toBe('—');
     expect(km(undefined)).toBe('—');
+  });
+});
+
+describe('godzinyLubMinuty — format dla WYMAGAŃ, nie dla przepracowanego czasu', () => {
+  it('poniżej godziny podaje minuty', () => {
+    // `0,42 h` nie mówi nic — dla celu rozłożonego na dwadzieścia dni
+    // karta pokazywała wcześniej „—", jakby nie było czego liczyć.
+    expect(godzinyLubMinuty(0.42)).toBe('25 min');
+    expect(godzinyLubMinuty(0.5)).toBe('30 min');
+    expect(godzinyLubMinuty(0.02)).toBe('1 min');
+  });
+
+  it('pełne godziny bez zbędnych zer', () => {
+    expect(godzinyLubMinuty(1)).toBe('1 h');
+    expect(godzinyLubMinuty(3)).toBe('3 h');
+  });
+
+  it('godziny z minutami', () => {
+    expect(godzinyLubMinuty(1.5)).toBe('1 h 30 min');
+    expect(godzinyLubMinuty(2.25)).toBe('2 h 15 min');
+  });
+
+  it('wartości znikome mają własny komunikat, nie „0 min"', () => {
+    expect(godzinyLubMinuty(0.001)).toBe('mniej niż minutę');
+  });
+
+  it('zero i wartości ujemne', () => {
+    expect(godzinyLubMinuty(0)).toBe('0 min');
+    expect(godzinyLubMinuty(-1)).toBe('0 min');
+  });
+
+  it('NaN i brak wartości dają myślnik', () => {
+    expect(godzinyLubMinuty(NaN)).toBe('—');
+    expect(godzinyLubMinuty(null)).toBe('—');
+    expect(godzinyLubMinuty(undefined)).toBe('—');
   });
 });
 

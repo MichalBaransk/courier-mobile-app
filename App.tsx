@@ -41,7 +41,7 @@ import {
 import { wczytajKolejke, zapiszKolejke } from './src/kolejkaMagazyn';
 import { KolejkaPasek } from './src/KolejkaPasek';
 import { clearToken, readToken } from './src/storage';
-import { dataPoPolsku, przesunDate } from './src/format';
+import { dataPoPolsku, krotkaData, przesunDate } from './src/format';
 import {
   etykietaTygodnia,
   nazwaMiesiaca,
@@ -194,6 +194,16 @@ export default function App() {
   const [wysylamKolejke, setWysylamKolejke] = useState(false);
   /** Który cel jest właśnie ustawiany; `null` = modal zamknięty. */
   const [celDoUstawienia, setCelDoUstawienia] = useState<'MONTHLY' | 'WEEKLY' | null>(null);
+  /**
+   * Ostatnie zaznaczenie zdjęte przyciskiem „Cały miesiąc" w ofertach.
+   *
+   * Bez tego „Cały miesiąc" była drogą w jedną stronę: zaznaczenie znikało
+   * razem z paskiem, więc nie było czego dotknąć, żeby wrócić do dnia,
+   * na który się patrzyło.
+   */
+  const [poprzednieZawezenie, setPoprzednieZawezenie] = useState<
+    { rodzaj: 'dzien' | 'tydzien'; wartosc: string } | null
+  >(null);
   const [kwotaCelu, setKwotaCelu] = useState<number | null>(null);
 
   useEffect(() => {
@@ -367,6 +377,7 @@ export default function App() {
       setPotwierdzenie(null);
       setWybranyDzien(null);
       setWybranyTydzien(null);
+      setPoprzednieZawezenie(null);
       setMiesiac(przesunDate(zakresMiesiaca(miesiac).od, kierunek === 1 ? 32 : -1));
     },
     [miesiac]
@@ -418,12 +429,16 @@ export default function App() {
   const zaznaczDzien = useCallback((data: string) => {
     setPotwierdzenie(null);
     setWybranyTydzien(null);
+    // Nowy wybór w kalendarzu unieważnia „wróć do" w ofertach — inaczej
+    // przycisk odsyłałby do dnia, którego użytkownik dawno nie ogląda.
+    setPoprzednieZawezenie(null);
     setWybranyDzien((poprzedni) => (poprzedni === data ? null : data));
   }, []);
 
   const zaznaczTydzien = useCallback((pn: string) => {
     setPotwierdzenie(null);
     setWybranyDzien(null);
+    setPoprzednieZawezenie(null);
     setWybranyTydzien((poprzedni) => (poprzedni === pn ? null : pn));
   }, []);
 
@@ -585,11 +600,11 @@ export default function App() {
     <View style={s.tlo}>
       <StatusBar style="light" />
 
-      {sekcja === 'cele' ? (
+      {sekcja === 'cele' || sekcja === 'portfel' ? (
         <View style={s.gora}>
           <View style={s.naglowekBlok}>
             <Text style={s.naglowekTekst} numberOfLines={1}>
-              Cele i portfel
+              {sekcja === 'cele' ? 'Cele zarobkowe' : 'Portfel Glovo'}
             </Text>
           </View>
         </View>
@@ -730,11 +745,43 @@ export default function App() {
                 </Text>
                 <Pressable
                   onPress={() => {
+                    setPoprzednieZawezenie(
+                      wybranyDzien !== null
+                        ? { rodzaj: 'dzien', wartosc: wybranyDzien }
+                        : wybranyTydzien !== null
+                          ? { rodzaj: 'tydzien', wartosc: wybranyTydzien }
+                          : null
+                    );
                     setWybranyDzien(null);
                     setWybranyTydzien(null);
                   }}
                 >
                   <Text style={s.filtrLink}>Cały miesiąc</Text>
+                </Pressable>
+              </View>
+            ) : poprzednieZawezenie !== null ? (
+              <View style={s.filtr}>
+                <Text style={s.filtrTekst} numberOfLines={1}>
+                  Cały miesiąc
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    if (poprzednieZawezenie.rodzaj === 'dzien') {
+                      setWybranyDzien(poprzednieZawezenie.wartosc);
+                      setWybranyTydzien(null);
+                    } else {
+                      setWybranyTydzien(poprzednieZawezenie.wartosc);
+                      setWybranyDzien(null);
+                    }
+                    setPoprzednieZawezenie(null);
+                  }}
+                >
+                  <Text style={s.filtrLink}>
+                    ‹ Wróć do:{' '}
+                    {poprzednieZawezenie.rodzaj === 'dzien'
+                      ? krotkaData(poprzednieZawezenie.wartosc)
+                      : `tyg. ${numerTygodniaISO(poprzednieZawezenie.wartosc)}`}
+                  </Text>
                 </Pressable>
               </View>
             ) : null}
@@ -774,11 +821,28 @@ export default function App() {
               }}
             />
 
-            {saldo ? <KartaSalda saldo={saldo} /> : null}
-
             <Text style={s.podpowiedz}>
               Postęp celu serwer liczy zawsze dla BIEŻĄCEGO okresu — przewijanie kalendarza
               do innego miesiąca go nie zmienia.
+            </Text>
+          </>
+        ) : null}
+
+        {/* ================= PORTFEL ============================================= */}
+        {sekcja === 'portfel' ? (
+          <>
+            {saldo ? (
+              <KartaSalda saldo={saldo} />
+            ) : (
+              <View style={s.pustaSekcja}>
+                <Text style={s.pustaSekcjaTekst}>Nie udało się pobrać salda.</Text>
+                <Text style={s.podpowiedz}>Pociągnij w dół, żeby spróbować ponownie.</Text>
+              </View>
+            )}
+
+            <Text style={s.podpowiedz}>
+              Saldo to suma wszystkich transakcji Portfela ze znakiem. Transakcje trafiają do
+              bazy ze zrzutów ekranu wysłanych do bota — aplikacja ich na razie nie dodaje.
             </Text>
 
             <Pressable style={s.linkTekstowy} onPress={rozlacz}>
@@ -944,6 +1008,16 @@ const s = StyleSheet.create({
   filtrLink: { color: C.akcent, fontSize: 13, fontWeight: '600' },
 
   podpowiedz: { color: C.tekstPrzygaszony, fontSize: 11, lineHeight: 16, paddingHorizontal: 4 },
+
+  pustaSekcja: {
+    backgroundColor: C.karta,
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+  },
+  pustaSekcjaTekst: { color: C.tekstPrzygaszony, fontSize: 14, marginBottom: 4 },
 
   linkTekstowy: { alignItems: 'center', paddingVertical: 18, marginTop: 4 },
   linkTekstowyTekst: { color: C.tekstPrzygaszony, fontSize: 13 },

@@ -38,6 +38,27 @@ export const godziny = (v: number | null | undefined): string =>
 export const litry = (v: number | null | undefined): string =>
   bezpieczne(v, (n) => `${przecinek(n, 2)} L`);
 
+/**
+ * Czas w formie, którą da się przeczytać bez przeliczania w głowie.
+ *
+ * `0,42 h` nie mówi nic — `25 min` mówi wszystko. Poniżej godziny podajemy
+ * minuty, powyżej godziny i minuty. To jest format dla WYMAGAŃ („ile trzeba
+ * dziennie"), nie dla przepracowanego czasu — tam `9,75 h` jest w porządku
+ * i zgadza się z tym, co pokazuje bot.
+ */
+export function godzinyLubMinuty(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return MYSLNIK;
+  if (v <= 0) return '0 min';
+
+  const minuty = Math.round(v * 60);
+  if (minuty === 0) return 'mniej niż minutę';
+  if (minuty < 60) return `${minuty} min`;
+
+  const g = Math.floor(minuty / 60);
+  const m = minuty % 60;
+  return m === 0 ? `${g} h` : `${g} h ${m} min`;
+}
+
 /** Stawka `2,81` — bez jednostki, bo ta bywa w podpisie obok. */
 export const stawka = (v: number | null | undefined): string =>
   bezpieczne(v, (n) => przecinek(n, 2));

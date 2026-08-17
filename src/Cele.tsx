@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 
 import { ApiError, postCel } from './api';
-import { godziny, zl } from './format';
-import { skonczona } from './licz';
+import { godzinyLubMinuty, zl } from './format';
+import { iloraz, skonczona } from './licz';
 import { ocenLiczbe } from './limity';
 import { C } from './theme';
 import type { TargetProgress } from './types';
@@ -70,6 +70,18 @@ export function KartaCelu({
 
   const kolor = postep.isCompleted ? C.akcent : postep.progressPercent >= 60 ? C.akcent : C.ostrzezenie;
 
+  /**
+   * Godziny dziennie liczone TUTAJ, a nie brane z `hoursPerDayRequired`.
+   *
+   * Serwer zaokrągla to pole do 0,1 h, czyli do sześciu minut. Przy celu
+   * rozłożonym na dwadzieścia dni wychodzi 0,02 h → zaokrągla się do zera →
+   * karta pokazywała „—", jakby nie było czego liczyć. Oba składniki
+   * (`estimatedHoursRemaining`, `daysRemaining`) przychodzą z serwera,
+   * więc dzielenie tutaj nie duplikuje żadnej reguły biznesowej — poprawia
+   * tylko rozdzielczość tego, co i tak jest już policzone.
+   */
+  const godzinDziennie = iloraz(postep.estimatedHoursRemaining, postep.daysRemaining);
+
   return (
     <View style={s.karta}>
       <View style={s.naglowekRzad}>
@@ -103,9 +115,17 @@ export function KartaCelu({
           <Wiersz etykieta="Brakuje" wartosc={zl(postep.remainingNetto)} />
           <Wiersz etykieta="Dziennie trzeba" wartosc={zl(postep.dailyRequiredNetto)} kolor={kolor} />
           <Wiersz
-            etykieta="To ok. godzin dziennie"
-            wartosc={postep.hoursPerDayRequired > 0 ? godziny(postep.hoursPerDayRequired) : '—'}
+            etykieta="To około"
+            wartosc={
+              godzinDziennie === null ? '—' : `${godzinyLubMinuty(godzinDziennie)} dziennie`
+            }
           />
+          {postep.estimatedHoursRemaining > 0 ? (
+            <Wiersz
+              etykieta="Do końca okresu"
+              wartosc={godzinyLubMinuty(postep.estimatedHoursRemaining)}
+            />
+          ) : null}
           <Text style={s.przypis}>
             {postep.usedFallbackRate
               ? `Przeliczone stawką domyślną ${zl(postep.avgHourlyRate)}/h — brak własnych godzin w tym okresie.`
