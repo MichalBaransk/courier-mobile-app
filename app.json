@@ -2,6 +2,7 @@
   "expo": {
     "name": "courier-app",
     "slug": "courier-app",
+    "scheme": "courierapp",
     "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
