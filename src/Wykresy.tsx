@@ -92,21 +92,53 @@ export function WykresTygodnia({
 /*  Kalendarz miesiąca (heatmapa)                                             */
 /* ========================================================================== */
 
+/** Ile pikseli w bok wystarczy, żeby uznać ruch za przewijanie miesiąca. */
+const PROG_PRZECHWYCENIA = 12;
+/** Ile trzeba przejechać ŁĄCZNIE, żeby miesiąc faktycznie się zmienił. */
+const PROG_ZMIANY = 45;
+/** Szybki ruch liczy się nawet przy krótkim dystansie. */
+const PROG_PREDKOSCI = 0.25;
+
 /**
  * Rozpoznanie przesunięcia w bok, wspólne dla kalendarza w zakładce i w modalu.
  *
- * Progi są celowo asymetryczne: potrzeba 40 px poziomo i DWA RAZY więcej
- * w poziomie niż w pionie. Bez tego przewijanie ekranu palcem po siatce
- * łapałoby się jako zmiana miesiąca, a dotknięcie dnia bywałoby zjadane.
+ * ⚠️ KLUCZOWE JEST `Capture`, NIE SAM PRÓG.
+ *
+ * Pierwsza wersja używała zwykłego `onMoveShouldSetPanResponder` z progiem
+ * 40 px i działała opornie: zanim palec przejechał te 40 px, dotyk zdążył
+ * przejąć otaczający `ScrollView` razem z `RefreshControl` — więc ruch w bok
+ * częściej wywoływał odświeżenie aplikacji niż zmianę miesiąca.
+ *
+ * W React Native przodek dostaje pytanie o responder w fazie PRZECHWYTYWANIA
+ * wcześniej niż potomek w fazie zwykłej. Dlatego kalendarz musi pytać
+ * w `...Capture`, i to przy niskim progu (12 px), żeby zgłosić się PRZED
+ * scrollem. Do tego `onPanResponderTerminationRequest: () => false`, bo bez
+ * niego scroll odbiera gest w trakcie przeciągania.
+ *
+ * Rozdzielone są dwa progi: **przechwycenia** (12 px — kiedy przestajemy
+ * pozwalać scrollowi) i **zmiany** (45 px albo szybki ruch — kiedy miesiąc
+ * naprawdę się przesuwa). Dzięki temu krótkie drgnięcie palca nic nie robi,
+ * ale też nie ląduje w scrollu w połowie.
+ *
+ * Ruch w pionie nadal należy do scrolla: wymagamy, żeby poziomy był co
+ * najmniej półtora raza większy.
  */
 export function gestPrzewijania(onLewo: () => void, onPrawo: () => void) {
   return PanResponder.create({
-    // `false` — dotknięcie dnia ma trafić do `Pressable`, nie tutaj.
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 40 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+    // Dotknięcie bez ruchu ma trafić do `Pressable` na dniu, nie tutaj.
+    onStartShouldSetPanResponderCapture: () => false,
+    onMoveShouldSetPanResponderCapture: (_e, g) =>
+      Math.abs(g.dx) > PROG_PRZECHWYCENIA && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+
+    // Raz złapany gest nie wraca do scrolla ani do RefreshControl.
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+
     onPanResponderRelease: (_e, g) => {
-      if (g.dx <= -40) onLewo();
-      else if (g.dx >= 40) onPrawo();
+      const wystarczy = Math.abs(g.dx) >= PROG_ZMIANY || Math.abs(g.vx) >= PROG_PREDKOSCI;
+      if (!wystarczy) return;
+      if (g.dx < 0) onLewo();
+      else onPrawo();
     },
   });
 }
