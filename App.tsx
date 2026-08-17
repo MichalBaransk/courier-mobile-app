@@ -750,6 +750,8 @@ export default function App() {
                 wybrany={wybranyDzien}
                 wybranyTydzien={wybranyTydzien}
                 dniZOfertami={dniZOfertami}
+                onNastepnyMiesiac={wPrzodZablokowany ? null : () => przesunMiesiac(1)}
+                onPoprzedniMiesiac={() => przesunMiesiac(-1)}
                 onWybierz={zaznaczDzien}
                 onWybierzTydzien={zaznaczTydzien}
               />
@@ -1017,6 +1019,8 @@ export default function App() {
               widoczny={kalendarzOfert}
               wartosc={wybranyDzien}
               maks={dzisiaj}
+              miesiac={miesiac}
+              dniZOfertami={dniZOfertami}
               onWybierz={(data) => {
                 wybierzDzienZKalendarza(data);
                 setKalendarzOfert(false);

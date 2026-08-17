@@ -107,6 +107,12 @@ function EdytorPrzedzialu({
         ) : null}
       </View>
 
+      {godzin <= 0 ? (
+        <Text style={s.ostrzezenie}>
+          Początek i koniec są takie same, więc ten dzień ma zero godzin. Przesuń koniec.
+        </Text>
+      ) : null}
+
       {zaDlugo ? (
         <Text style={s.ostrzezenie}>
           {godzinyLubMinuty(godzin)} to dłużej niż {MAKS_GODZIN_DZIENNIE} h — serwer odrzuciłby
@@ -118,10 +124,28 @@ function EdytorPrzedzialu({
 }
 
 export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: Props) {
-  const [robocza, setRobocza] = useState<Array<DzienPracy | null>>([...wartosc]);
+  /**
+   * ⚠️ „DZIEŃ ROBOCZY" I „GODZINY" TO DWA OSOBNE STANY — i to nie jest
+   * nadmiarowość, tylko poprawka realnego błędu.
+   *
+   * Wcześniej jeden `Array<DzienPracy | null>` niósł oba naraz: `null` znaczyło
+   * dzień wolny. Skutek był taki, że przeciągnięcie suwaka końca do godziny
+   * początku dawało przedział zerowej długości, `godzinyDnia` zwracało 0 —
+   * i WSZYSTKIE dni znikały z zaznaczenia w trakcie przeciągania. Wyglądało
+   * to na zawieszenie edytora, a było zwykłym skutkiem ubocznym modelu.
+   *
+   * Teraz `wlaczone` mówi, czy dzień jest roboczy, a `przedzialy` — w jakich
+   * godzinach. Zerowa długość jest wtedy tylko stanem przejściowym, o którym
+   * mówi ostrzeżenie, a nie kasowaniem zaznaczenia.
+   */
+  const [przedzialy, setPrzedzialy] = useState<DzienPracy[]>(() =>
+    DNI_SKROT.map(() => DOMYSLNY)
+  );
+  const [wlaczone, setWlaczone] = useState<boolean[]>(() => DNI_SKROT.map(() => false));
   const [osobno, setOsobno] = useState(false);
   /** Który dzień jest rozwinięty w trybie „osobno". */
   const [edytowany, setEdytowany] = useState<number | null>(null);
+  const [blad, setBlad] = useState<string | null>(null);
 
   // `Modal` z `visible={false}` zostaje w drzewie, więc stan nie resetuje się
   // sam — bez tego edytor pamiętałby porzucone zmiany z poprzedniego otwarcia.
@@ -129,41 +153,63 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
   if (widoczny !== poprzednioWidoczny) {
     setPoprzednioWidoczny(widoczny);
     if (widoczny) {
-      setRobocza([...(czyUstawiony(wartosc) ? wartosc : PROPOZYCJA)]);
+      const zrodlo = czyUstawiony(wartosc) ? wartosc : PROPOZYCJA;
+      setPrzedzialy(DNI_SKROT.map((_, i) => zrodlo[i] ?? DOMYSLNY));
+      setWlaczone(DNI_SKROT.map((_, i) => godzinyDnia(zrodlo[i] ?? null) > 0));
       setOsobno(false);
       setEdytowany(null);
+      setBlad(null);
     }
   }
 
-  const aktywne = robocza.filter((d): d is DzienPracy => godzinyDnia(d) > 0);
+  /** Tydzień w formie, w której zapisujemy go na dysk. */
+  const zlozony: Tydzien = przedzialy.map((p, i) =>
+    wlaczone[i] && godzinyDnia(p) > 0 ? p : null
+  );
+
+  const czynne = przedzialy.filter((_, i) => wlaczone[i]);
   /** Wspólny przedział — tylko gdy wszystkie dni robocze mają ten sam. */
   const wspolny =
-    aktywne.length > 0 && aktywne.every((d) => d.od === aktywne[0]?.od && d.do === aktywne[0]?.do)
-      ? (aktywne[0] ?? DOMYSLNY)
+    czynne.length > 0 && czynne.every((d) => d.od === czynne[0]?.od && d.do === czynne[0]?.do)
+      ? (czynne[0] ?? DOMYSLNY)
       : null;
 
   const przelacz = (i: number) => {
-    setRobocza((p) => {
+    setBlad(null);
+    setWlaczone((p) => {
       const n = [...p];
-      n[i] = godzinyDnia(n[i] ?? null) > 0 ? null : (wspolny ?? DOMYSLNY);
+      n[i] = !n[i];
       return n;
     });
   };
 
   const ustawWszystkim = (przedzial: DzienPracy) => {
-    setRobocza((p) => p.map((d) => (godzinyDnia(d) > 0 ? przedzial : null)));
+    setBlad(null);
+    setPrzedzialy((p) => p.map((stary, i) => (wlaczone[i] ? przedzial : stary)));
   };
 
   const ustawDzien = (i: number, przedzial: DzienPracy) => {
-    setRobocza((p) => {
+    setBlad(null);
+    setPrzedzialy((p) => {
       const n = [...p];
       n[i] = przedzial;
       return n;
     });
   };
 
-  const suma = sumaTygodnia(robocza);
-  const dni = ileDniRoboczych(robocza);
+  const zapisz = () => {
+    const pusteDni = DNI_SKROT.filter((_, i) => wlaczone[i] && godzinyDnia(przedzialy[i] ?? null) <= 0);
+    if (pusteDni.length > 0) {
+      setBlad(
+        `Dni bez godzin: ${pusteDni.join(', ')}. Początek i koniec są takie same — przesuń koniec albo odznacz te dni.`
+      );
+      return;
+    }
+    onZapisz(zlozony);
+  };
+
+  const suma = sumaTygodnia(zlozony);
+  const dni = ileDniRoboczych(zlozony);
 
   return (
     <Modal visible={widoczny} animationType="slide" transparent={false} onRequestClose={onZamknij}>
@@ -178,7 +224,7 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
           <Text style={s.etykieta}>Dni robocze</Text>
           <View style={s.chipy}>
             {DNI_SKROT.map((d, i) => {
-              const wlaczony = godzinyDnia(robocza[i] ?? null) > 0;
+              const wlaczony = wlaczone[i] === true;
               return (
                 <Pressable
                   key={d}
@@ -200,7 +246,7 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
           {!osobno ? (
             <>
               <Text style={s.etykieta}>Godziny pracy — wspólne dla zaznaczonych dni</Text>
-              {wspolny === null && aktywne.length > 0 ? (
+              {wspolny === null && czynne.length > 0 ? (
                 <Text style={s.uwaga}>
                   Dni mają teraz różne godziny. Ruszenie suwaka ustawi wszystkim tę samą wartość.
                 </Text>
@@ -215,8 +261,8 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
             <>
               <Text style={s.etykieta}>Godziny osobno dla każdego dnia</Text>
               {DNI_SKROT.map((nazwa, i) => {
-                const d = robocza[i] ?? null;
-                if (godzinyDnia(d) <= 0 || d === null) return null;
+                if (wlaczone[i] !== true) return null;
+                const d = przedzialy[i] ?? DOMYSLNY;
                 const otwarty = edytowany === i;
 
                 return (
@@ -254,9 +300,11 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
             </Text>
           </View>
 
+          {blad !== null ? <Text style={s.blad}>{blad}</Text> : null}
+
           <Pressable
             style={({ pressed }) => [s.zapisz, pressed && s.wcisniety]}
-            onPress={() => onZapisz(robocza)}
+            onPress={zapisz}
           >
             <Text style={s.zapiszTekst}>Zapisz</Text>
           </Pressable>
@@ -344,6 +392,7 @@ const s = StyleSheet.create({
   strzalkaDnia: { color: C.tekstPrzygaszony, fontSize: 13 },
 
   ostrzezenie: { color: C.ostrzezenie, fontSize: 12, marginTop: 10, lineHeight: 17 },
+  blad: { color: C.blad, fontSize: 13, marginTop: 14, lineHeight: 18 },
   uwaga: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: -4, marginBottom: 8, lineHeight: 16 },
 
   link: { paddingVertical: 16 },

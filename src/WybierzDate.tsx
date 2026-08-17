@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { przesunDate } from './format';
 import { dniZakresu, dzienTygodnia, nazwaMiesiaca, zakresMiesiaca } from './okresy';
 import { C } from './theme';
+import { gestPrzewijania } from './Wykresy';
 
 /**
  * Wybór daty z siatki miesiąca.
@@ -24,12 +25,52 @@ interface Props {
   wartosc: string | null;
   /** Najpóźniejszy wybieralny dzień — zwykle dzisiaj według serwera. */
   maks: string;
+  /**
+   * Miesiąc, na którym ma się otworzyć kalendarz, gdy nic nie jest zaznaczone.
+   *
+   * Bez tego modal otwierał się zawsze na dzisiaj — czyli po przewinięciu
+   * listy ofert na marzec i dotknięciu „Wybierz dzień" trzeba było przewijać
+   * kalendarz z powrotem do marca.
+   */
+  miesiac?: string | null;
+  /** Dni, w których są oceniane oferty — do wyróżnienia kropką. */
+  dniZOfertami?: ReadonlySet<string>;
   onWybierz: (data: string) => void;
   onZamknij: () => void;
 }
 
-export function WybierzDate({ widoczny, wartosc, maks, onWybierz, onZamknij }: Props) {
-  const [kursor, setKursor] = useState(wartosc ?? maks);
+export function WybierzDate({
+  widoczny,
+  wartosc,
+  maks,
+  miesiac,
+  dniZOfertami,
+  onWybierz,
+  onZamknij,
+}: Props) {
+  const [kursor, setKursor] = useState(wartosc ?? miesiac ?? maks);
+
+  /**
+   * Kursor ustawiany PRZY KAŻDYM OTWARCIU, nie raz przy montowaniu.
+   *
+   * `Modal` z `visible={false}` zostaje w drzewie, więc `useState` odpalał się
+   * dokładnie raz — kalendarz na zawsze pamiętał pierwszy miesiąc, jaki
+   * zobaczył.
+   */
+  const [poprzednioWidoczny, setPoprzednioWidoczny] = useState(false);
+  if (widoczny !== poprzednioWidoczny) {
+    setPoprzednioWidoczny(widoczny);
+    if (widoczny) setKursor(wartosc ?? miesiac ?? maks);
+  }
+
+  const wTyl = useRef<() => void>(() => {});
+  const wPrzod = useRef<() => void>(() => {});
+  const gest = useRef(
+    gestPrzewijania(
+      () => wPrzod.current(),
+      () => wTyl.current()
+    )
+  ).current;
 
   const zakres = zakresMiesiaca(kursor);
   const daty = dniZakresu(zakres);
@@ -38,11 +79,16 @@ export function WybierzDate({ widoczny, wartosc, maks, onWybierz, onZamknij }: P
 
   const wPrzodZablokowane = zakres.od >= zakresMiesiaca(maks).od;
 
+  wTyl.current = () => setKursor(przesunDate(zakresMiesiaca(kursor).od, -1));
+  wPrzod.current = () => {
+    if (!wPrzodZablokowane) setKursor(przesunDate(zakresMiesiaca(kursor).od, 32));
+  };
+
   return (
     <Modal visible={widoczny} animationType="fade" transparent onRequestClose={onZamknij}>
       <Pressable style={s.przyciemnienie} onPress={onZamknij}>
         {/* Pusty `onPress` zatrzymuje zamknięcie przy dotknięciu samej karty. */}
-        <Pressable style={s.karta} onPress={() => {}}>
+        <Pressable style={s.karta} onPress={() => {}} {...gest.panHandlers}>
           <View style={s.nawigacja}>
             <Pressable
               style={s.strzalka}
@@ -92,11 +138,21 @@ export function WybierzDate({ widoczny, wartosc, maks, onWybierz, onZamknij }: P
                     >
                       {Number(data.slice(8, 10))}
                     </Text>
+                    {dniZOfertami?.has(data) ? <View style={s.kropkaOfert} /> : null}
                   </View>
                 </Pressable>
               );
             })}
           </View>
+
+          {dniZOfertami !== undefined ? (
+            <View style={s.legenda}>
+              <View style={s.kropkaLegenda} />
+              <Text style={s.legendaTekst}>dzień z ocenionymi ofertami</Text>
+            </View>
+          ) : null}
+
+          <Text style={s.podpowiedz}>Przesuń palcem w bok, żeby zmienić miesiąc.</Text>
 
           <View style={s.stopka}>
             <Pressable onPress={() => onWybierz(maks)}>
@@ -176,4 +232,17 @@ const s = StyleSheet.create({
     borderTopColor: C.obramowanie,
   },
   link: { color: C.akcent, fontSize: 14, fontWeight: '600' },
+
+  kropkaOfert: {
+    position: 'absolute',
+    bottom: 2,
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: C.ostrzezenie,
+  },
+  legenda: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  kropkaLegenda: { width: 5, height: 5, borderRadius: 999, backgroundColor: C.ostrzezenie },
+  legendaTekst: { color: C.tekstPrzygaszony, fontSize: 11 },
+  podpowiedz: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 8 },
 });

@@ -1,4 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useRef } from 'react';
 
 import { zl } from './format';
 import { procentUdzialu, skonczona } from './licz';
@@ -90,12 +92,33 @@ export function WykresTygodnia({
 /*  Kalendarz miesiąca (heatmapa)                                             */
 /* ========================================================================== */
 
+/**
+ * Rozpoznanie przesunięcia w bok, wspólne dla kalendarza w zakładce i w modalu.
+ *
+ * Progi są celowo asymetryczne: potrzeba 40 px poziomo i DWA RAZY więcej
+ * w poziomie niż w pionie. Bez tego przewijanie ekranu palcem po siatce
+ * łapałoby się jako zmiana miesiąca, a dotknięcie dnia bywałoby zjadane.
+ */
+export function gestPrzewijania(onLewo: () => void, onPrawo: () => void) {
+  return PanResponder.create({
+    // `false` — dotknięcie dnia ma trafić do `Pressable`, nie tutaj.
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 40 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+    onPanResponderRelease: (_e, g) => {
+      if (g.dx <= -40) onLewo();
+      else if (g.dx >= 40) onPrawo();
+    },
+  });
+}
+
 export function KalendarzMiesiaca({
   zakres,
   dni,
   wybrany,
   wybranyTydzien,
   dniZOfertami,
+  onNastepnyMiesiac,
+  onPoprzedniMiesiac,
   onWybierz,
   onWybierzTydzien,
 }: {
@@ -112,6 +135,10 @@ export function KalendarzMiesiaca({
    * oceny ofert i odwrotnie.
    */
   dniZOfertami: ReadonlySet<string>;
+  /** Przesunięcie palcem w lewo — miesiąc w przód. `null` = zablokowane. */
+  onNastepnyMiesiac: (() => void) | null;
+  /** Przesunięcie palcem w prawo — miesiąc wstecz. */
+  onPoprzedniMiesiac: () => void;
   onWybierz: (data: string) => void;
   onWybierzTydzien: (poniedzialek: string) => void;
 }) {
@@ -128,8 +155,22 @@ export function KalendarzMiesiaca({
   const tygodnie: Array<Array<string | null>> = [];
   for (let i = 0; i < komorki.length; i += 7) tygodnie.push(komorki.slice(i, i + 7));
 
+  const gest = useRef(
+    gestPrzewijania(
+      () => wPrzod.current?.(),
+      () => wTyl.current?.()
+    )
+  ).current;
+
+  // W refach, bo `PanResponder` powstaje raz i domknąłby na pierwszych
+  // funkcjach — po zmianie miesiąca przesuwałby zawsze z tego samego miejsca.
+  const wPrzod = useRef<(() => void) | null>(null);
+  const wTyl = useRef<(() => void) | null>(null);
+  wPrzod.current = onNastepnyMiesiac;
+  wTyl.current = onPoprzedniMiesiac;
+
   return (
-    <View style={s.karta}>
+    <View style={s.karta} {...gest.panHandlers}>
       <Text style={s.naglowek}>KALENDARZ — IM JAŚNIEJ, TYM WIĘCEJ</Text>
 
       <View style={s.wiersze}>
@@ -182,14 +223,11 @@ export function KalendarzMiesiaca({
                     >
                       {Number(data.slice(8, 10))}
                     </Text>
-                    {dniZOfertami.has(data) ? (
-                      <View
-                        style={[
-                          s.kropkaOfert,
-                          netto > 0 && intensywnosc > 0.55 && s.kropkaNaJasnym,
-                        ]}
-                      />
-                    ) : null}
+                    {/* JEDEN kolor, niezależnie od jasności kafelka.
+                        Wcześniej na jasnym tle kropka przełączała się na kolor
+                        tła, czyli granatowy — na zieleni czytało się to jak
+                        czarną plamę i wyglądało na błąd renderowania. */}
+                    {dniZOfertami.has(data) ? <View style={s.kropkaOfert} /> : null}
                   </Pressable>
                 );
               })}
@@ -204,7 +242,8 @@ export function KalendarzMiesiaca({
       </View>
 
       <Text style={s.stopkaKalendarza}>
-        Najlepszy dzień: {zl(maks)}. Dotknij dnia — albo numeru tygodnia po lewej.
+        Najlepszy dzień: {zl(maks)}. Dotknij dnia albo numeru tygodnia po lewej. Przesuń palcem
+        w bok, żeby zmienić miesiąc.
       </Text>
     </View>
   );
@@ -291,8 +330,6 @@ const s = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: C.ostrzezenie,
   },
-  kropkaNaJasnym: { backgroundColor: C.tlo },
-
   legenda: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
   kropkaOfertLegenda: {
     width: 5,
