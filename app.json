@@ -2,7 +2,7 @@
   "expo": {
     "name": "courier-app",
     "slug": "courier-app",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -23,7 +23,32 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Aplikacja używa lokalizacji, żeby policzyć dojazd do restauracji od Twojej BIEŻĄCEJ pozycji, a nie od ostatniego ręcznie wysłanego punktu.",
+          "locationAlwaysAndWhenInUsePermission": "Lokalizacja w tle pozwala liczyć dojazd również wtedy, gdy aplikacja jest zminimalizowana podczas kursu.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Dostęp do zdjęć pozwala dodać paragon paliwowy albo zrzut oferty prosto z galerii.",
+          "cameraPermission": "Aparat pozwala sfotografować paragon paliwowy bez zapisywania go w galerii."
+        }
+      ],
+      "expo-notifications",
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": [
+            "image/*"
+          ]
+        }
+      ]
     ],
     "extra": {
       "eas": {

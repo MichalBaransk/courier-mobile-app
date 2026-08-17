@@ -1,13 +1,5 @@
-import {
-  Dimensions,
-  Platform,
-  Pressable,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C } from './theme';
 
@@ -15,14 +7,13 @@ import { C } from './theme';
  * Pasek sekcji na dole ekranu.
  *
  * Napisany od zera, nie przez `@react-navigation/*`: tamto ciągnie
- * `react-native-screens` i `react-native-safe-area-context`, czyli DWA moduły
- * natywne. Za cztery przyciski przełączające stan to cena nie do przyjęcia —
- * koniec aktualizacji OTA i build APK przy każdej zmianie koloru.
+ * `react-native-screens`, czyli kolejny moduł natywny i całą warstwę
+ * nawigacji, której tu nie ma po co mieć. Cztery przyciski przełączające
+ * stan to cztery przyciski przełączające stan.
  *
  * Ikona i podpis to DWA osobne węzły `Text`. Emoji razem z tekstem w jednym
- * `Text` już raz w tym projekcie wyświetliło się na telefonie jako sama ikona
- * z pustym polem obok (chipy „napiwek" i „dystans"). Nie odtworzyłem tego
- * u siebie, więc zamiast zgadywać przyczynę — nie łączę ich.
+ * `Text` raz wyświetliło się na telefonie jako sama ikona z pustym polem
+ * obok. Przyczyny nie ustaliłem — więc ich nie łączę.
  */
 
 export type Sekcja = 'kalendarz' | 'oferty' | 'cele' | 'portfel';
@@ -34,36 +25,6 @@ const SEKCJE: Array<{ id: Sekcja; ikona: string; podpis: string }> = [
   { id: 'portfel', ikona: '💰', podpis: 'Portfel' },
 ];
 
-/** Zapas na gest cofania, gdy nie da się zmierzyć belki systemowej. */
-const ZAPAS_MIN = 12;
-/** Górna granica — żeby błąd pomiaru nie zjadł kawałka ekranu. */
-const ZAPAS_MAKS = 48;
-
-/**
- * Wysokość belki nawigacji systemu Androida.
- *
- * Od Androida 15 aplikacje rysują się od krawędzi do krawędzi, więc pasek
- * sekcji lądował POD przyciskami systemu i dolny rząd robił się nieklikalny.
- * Poprawnie mierzy to `react-native-safe-area-context` — ale to moduł natywny,
- * czyli koniec OTA (§10 planu). Do czasu paczki natywnej liczymy to z różnicy
- * między wysokością ekranu a wysokością okna aplikacji.
- *
- * To jest PRZYBLIŻENIE, nie pomiar. Przy nawigacji gestowej różnica bywa
- * zerowa, przy trzech przyciskach to około 48 dp. Dlatego wynik jest przycięty
- * z obu stron: bez dolnej granicy pasek dotykałby krawędzi ekranu, bez górnej
- * jeden dziwny odczyt zostawiłby wielką dziurę.
- */
-function zapasNaBelke(wysokoscOkna: number): number {
-  if (Platform.OS !== 'android') return ZAPAS_MIN;
-
-  const ekran = Dimensions.get('screen').height;
-  const gora = StatusBar.currentHeight ?? 0;
-  const roznica = ekran - wysokoscOkna - gora;
-
-  if (!Number.isFinite(roznica)) return ZAPAS_MIN;
-  return Math.min(ZAPAS_MAKS, Math.max(ZAPAS_MIN, Math.round(roznica)));
-}
-
 export function PasekSekcji({
   aktywna,
   onZmien,
@@ -71,10 +32,20 @@ export function PasekSekcji({
   aktywna: Sekcja;
   onZmien: (sekcja: Sekcja) => void;
 }) {
-  // `useWindowDimensions` przelicza się przy obrocie i przy zmianie trybu
-  // nawigacji systemowej — inaczej zapas zostałby z pierwszego renderu.
-  const { height } = useWindowDimensions();
-  const dol = zapasNaBelke(height);
+  /**
+   * PRAWDZIWY margines bezpieczny, nie przybliżenie.
+   *
+   * Wcześniej liczyłem go z różnicy między wysokością ekranu a wysokością
+   * okna i przycinałem do 12–48 dp. Działało „mniej więcej", czyli w praktyce
+   * pasek nadal wchodził pod przyciski systemu — widać to było na zrzucie.
+   *
+   * `useSafeAreaInsets` czyta insety z systemu i sam przelicza je przy zmianie
+   * trybu nawigacji (gesty kontra trzy przyciski) oraz przy obrocie. Dolna
+   * podłoga 8 dp jest po to, żeby przy nawigacji gestowej (inset bliski zeru)
+   * podpisy nie dotykały krawędzi ekranu.
+   */
+  const insets = useSafeAreaInsets();
+  const dol = Math.max(8, insets.bottom);
 
   return (
     <View style={[s.pasek, { paddingBottom: dol }]}>

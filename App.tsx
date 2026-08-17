@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   ApiError,
@@ -160,7 +161,22 @@ const OKNO_ODNIESIENIA_DNI = 30;
  * Poprzedni podział na zakładki Dzień/Tydzień/Miesiąc wymagał trzymania w głowie,
  * w której się jest, i skakania między nimi, żeby porównać dwa dni.
  */
+/**
+ * `SafeAreaProvider` musi opakowywać CAŁĄ aplikację.
+ *
+ * Bez niego `useSafeAreaInsets` w pasku sekcji zwraca same zera i wracamy
+ * dokładnie do problemu, który ta paczka miała naprawić — tyle że po cichu,
+ * bo zera to poprawna liczba, tylko nieprawdziwa.
+ */
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <Aplikacja />
+    </SafeAreaProvider>
+  );
+}
+
+function Aplikacja() {
   const [stan, setStan] = useState<Stan>('wczytywanie');
   const [token, setToken] = useState<string | null>(null);
 
@@ -198,6 +214,14 @@ export default function App() {
    * o tym samym.
    */
   const [sekcja, setSekcja] = useState<Sekcja>('kalendarz');
+
+  /**
+   * Górny margines też z systemu, nie z oka.
+   *
+   * `paddingTop: 52` było zgadywaniem pod jeden telefon. Przy wyższym pasku
+   * stanu nagłówek wchodził pod zegarek, przy niższym zostawała dziura.
+   */
+  const insets = useSafeAreaInsets();
 
   /** Niewysłane zapisy. Ładowane z dysku raz, przy starcie. */
   const [kolejka, setKolejka] = useState<WpisKolejki[]>([]);
@@ -679,7 +703,7 @@ export default function App() {
       <StatusBar style="light" />
 
       {sekcja === 'cele' || sekcja === 'portfel' ? (
-        <View style={s.gora}>
+        <View style={[s.gora, { paddingTop: insets.top + 10 }]}>
           <View style={s.naglowekBlok}>
             <Text style={s.naglowekTekst} numberOfLines={1}>
               {sekcja === 'cele' ? 'Cele zarobkowe' : 'Portfel Glovo'}
@@ -687,7 +711,7 @@ export default function App() {
           </View>
         </View>
       ) : (
-        <View style={s.gora}>
+        <View style={[s.gora, { paddingTop: insets.top + 10 }]}>
           <Pressable style={s.strzalka} onPress={() => przesunMiesiac(-1)}>
             <Text style={s.strzalkaTekst}>‹</Text>
           </Pressable>
@@ -1065,10 +1089,10 @@ const s = StyleSheet.create({
   srodek: { justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
   zawartosc: { padding: 16, paddingBottom: 40 },
 
+  // `paddingTop` dokładany z insetów w miejscu użycia — patrz `insets.top`.
   gora: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 52,
     paddingHorizontal: 16,
     paddingBottom: 6,
   },
