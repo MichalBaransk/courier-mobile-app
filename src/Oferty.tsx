@@ -2,103 +2,23 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { km, stawka, zl } from './format';
-import { iloraz } from './licz';
+import { policzOferty } from './statystykiOfert';
 import { C } from './theme';
 import type { CourseOfferItem } from './types';
 
 /**
  * Oferty kursów ocenione przez bota ze zrzutu ekranu.
  *
- * Statystyki liczę TUTAJ, a nie przez `/api/v1/oferty/statystyki/:data`.
- * Powód jest praktyczny: listę ofert całego miesiąca i tak pobieram jednym
- * żądaniem pod kalendarz, więc odpytywanie serwera o sumy z jednego dnia
- * byłoby drugą podróżą po liczby, które już leżą w pamięci telefonu. Dzięki
- * temu ten sam komponent obsługuje dzień, tydzień i miesiąc — zmienia się
- * tylko zakres listy, nie sposób liczenia.
+ * Statystyki liczy `statystykiOfert.ts` — po stronie telefonu, nie przez
+ * `/api/v1/oferty/statystyki/:data`. Powód jest praktyczny: listę ofert całego
+ * miesiąca i tak pobieram jednym żądaniem pod kalendarz, więc odpytywanie
+ * serwera o sumy z jednego dnia byłoby drugą podróżą po liczby, które już leżą
+ * w pamięci. Dzięki temu ten sam komponent obsługuje dzień, tydzień i miesiąc —
+ * zmienia się tylko zakres listy, nie sposób liczenia.
  *
- * ⚠️ ROZBIEŻNOŚĆ Z BOTEM, ŚWIADOMA I DO UZGODNIENIA.
- *
- * `getCourseOfferStats` na serwerze liczy `avgNetRatePerKm` dzieląc przez
- * WSZYSTKIE oferty, a `bestNetRate`/`worstNetRate` bierze też z tych, które
- * mają `rateBasis: 'NONE'` i stawkę 0. Skutek: jedna oferta bez zgeokodowanego
- * adresu ustawia „najgorszą stawkę" na 0,00 zł/km i zaniża średnią — czyli
- * dokładnie ten sam rodzaj wiarygodnie wyglądającej bzdury, przed którym
- * ostrzega §8f.
- *
- * Tutaj oferty bez dystansu są pomijane w średniej i w skrajnych wartościach
- * (nadal liczą się do „ile ofert" i do sumy brutto). Liczby w aplikacji będą
- * więc WYŻSZE niż w `/statystyki` w bocie. Poprawka po stronie serwera to
- * osobna decyzja — zgodnie z zasadą „nie zmieniam bazowego kodu bez zgody".
+ * ⚠️ Wzory NIE są identyczne z tymi w bocie — patrz nagłówek
+ * `statystykiOfert.ts`, tam jest wyjaśnienie i powód.
  */
-
-export interface StatystykiOfert {
-  ile: number;
-  oplacalne: number;
-  nieoplacalne: number;
-  przyjete: number;
-  odrzucone: number;
-  oczekujace: number;
-  /** Średnia arytmetyczna stawek — „jakie oferty przychodzą". */
-  sredniaStawka: number | null;
-  /** Suma netto / suma km — „ile realnie wychodzi na kilometr". */
-  wazonaStawka: number | null;
-  najlepsza: number | null;
-  najgorsza: number | null;
-  sumaBrutto: number;
-  sumaKm: number;
-}
-
-export function policzOferty(oferty: CourseOfferItem[]): StatystykiOfert {
-  let oplacalne = 0;
-  let przyjete = 0;
-  let odrzucone = 0;
-  let oczekujace = 0;
-  let sumaStawek = 0;
-  let ileStawek = 0;
-  let sumaBrutto = 0;
-  let sumaNetto = 0;
-  let sumaKm = 0;
-  let najlepsza: number | null = null;
-  let najgorsza: number | null = null;
-
-  for (const o of oferty) {
-    if (o.isProfitable) oplacalne++;
-    if (o.status === 'ACCEPTED') przyjete++;
-    else if (o.status === 'REJECTED') odrzucone++;
-    else oczekujace++;
-
-    sumaBrutto += o.grossAmount;
-    sumaNetto += o.netAmount;
-    sumaKm += o.distanceTotalKm;
-
-    // Stawka bez dystansu nie znaczy nic — `rateBasis: 'NONE'` to dokładnie
-    // przypadek z §8f, gdzie geokoder nie miał adresu klienta. Wliczenie zera
-    // do średniej zaniżyłoby ją cicho i bezpowrotnie.
-    if (o.distanceTotalKm > 0 && o.netRatePerKm > 0) {
-      sumaStawek += o.netRatePerKm;
-      ileStawek++;
-      if (najlepsza === null || o.netRatePerKm > najlepsza) najlepsza = o.netRatePerKm;
-      if (najgorsza === null || o.netRatePerKm < najgorsza) najgorsza = o.netRatePerKm;
-    }
-  }
-
-  return {
-    ile: oferty.length,
-    oplacalne,
-    nieoplacalne: oferty.length - oplacalne,
-    przyjete,
-    odrzucone,
-    oczekujace,
-    // `iloraz` zwraca `null` przy zerowym mianowniku — dzień bez ani jednej
-    // oferty z dystansem daje „—", a nie `NaN`.
-    sredniaStawka: iloraz(sumaStawek, ileStawek),
-    wazonaStawka: iloraz(sumaNetto, sumaKm),
-    najlepsza,
-    najgorsza,
-    sumaBrutto,
-    sumaKm,
-  };
-}
 
 const POKAZ_NA_START = 6;
 

@@ -12,16 +12,20 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.10"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "sprawdz": "tsc --noEmit",
+    "sprawdz": "tsc --noEmit && vitest run",
     "patch": "bash scripts/zastosuj-patch.sh",
-    "wdroz": "bash scripts/wdroz.sh"
+    "wdroz": "bash scripts/wdroz.sh",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "codebase": "node scripts/make-codebase.mjs"
   },
   "private": true
 }

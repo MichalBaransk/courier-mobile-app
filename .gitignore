@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Zbiorczy zrzut kodu do udostepnienia — generowany przez `npm run codebase`.
+codebase.md
