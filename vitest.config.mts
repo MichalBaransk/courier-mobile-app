@@ -1,6 +1,16 @@
 import { defineConfig } from 'vitest/config';
 
 /**
+ * Rozszerzenie `.mts`, nie `.ts` — i to nie jest kaprys.
+ *
+ * `package.json` aplikacji nie ma `"type": "module"` (i mieć nie może, bo to
+ * projekt Expo), więc Vite ładował ten plik jako CommonJS, widział w środku
+ * składnię ESM i przy każdym `npm test` wypisywał ostrzeżenie o
+ * `configLoader: 'native'`. `.mts` mówi wprost „to jest ESM" i ostrzeżenie
+ * znika bez dotykania `package.json` ani ustawiania zmiennych środowiskowych.
+ */
+
+/**
  * Testy leżą OBOK kodu, w `src/`, i tylko takie są uruchamiane.
  *
  * To nie jest kwestia gustu. W repozytorium bota istniał `test/validation.test.ts`,
