@@ -95,6 +95,7 @@ export function KalendarzMiesiaca({
   dni,
   wybrany,
   wybranyTydzien,
+  dniZOfertami,
   onWybierz,
   onWybierzTydzien,
 }: {
@@ -103,6 +104,14 @@ export function KalendarzMiesiaca({
   wybrany: string | null;
   /** Poniedziałek zaznaczonego tygodnia albo `null`. */
   wybranyTydzien: string | null;
+  /**
+   * Dni, w których bot ocenił choć jedną ofertę.
+   *
+   * Osobny sygnał od jasności kafelka: ta mówi o ZAROBKU, kropka o tym, że
+   * jest co oglądać w zakładce Oferty. Dzień bez wpisu zarobku może mieć
+   * oceny ofert i odwrotnie.
+   */
+  dniZOfertami: ReadonlySet<string>;
   onWybierz: (data: string) => void;
   onWybierzTydzien: (poniedzialek: string) => void;
 }) {
@@ -173,12 +182,25 @@ export function KalendarzMiesiaca({
                     >
                       {Number(data.slice(8, 10))}
                     </Text>
+                    {dniZOfertami.has(data) ? (
+                      <View
+                        style={[
+                          s.kropkaOfert,
+                          netto > 0 && intensywnosc > 0.55 && s.kropkaNaJasnym,
+                        ]}
+                      />
+                    ) : null}
                   </Pressable>
                 );
               })}
             </View>
           );
         })}
+      </View>
+
+      <View style={s.legenda}>
+        <View style={s.kropkaOfertLegenda} />
+        <Text style={s.stopkaKalendarza}>dzień z ocenionymi ofertami</Text>
       </View>
 
       <Text style={s.stopkaKalendarza}>
@@ -260,6 +282,24 @@ const s = StyleSheet.create({
   wypelnienie: { position: 'absolute', top: 2, left: 2, right: 2, bottom: 2, borderRadius: 7 },
   numerDnia: { color: C.tekst, fontSize: 12, fontWeight: '600' },
   numerNaJasnym: { color: C.tlo },
+
+  kropkaOfert: {
+    position: 'absolute',
+    bottom: 4,
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: C.ostrzezenie,
+  },
+  kropkaNaJasnym: { backgroundColor: C.tlo },
+
+  legenda: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
+  kropkaOfertLegenda: {
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: C.ostrzezenie,
+  },
 
   stopkaKalendarza: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 12 },
 });

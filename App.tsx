@@ -660,6 +660,9 @@ export default function App() {
         ? `OFERTY — TYDZIEŃ ${numerTygodniaISO(wybranyTydzien)}`
         : 'OFERTY MIESIĄCA';
 
+  /** Dni miesiąca, w których jest choć jedna oceniona oferta — pod kropki w kalendarzu. */
+  const dniZOfertami = new Set(oferty.map((o) => o.date));
+
   /** Opis zawężenia listy ofert; `null` = cały miesiąc. */
   const zawezenie =
     wybranyDzien !== null
@@ -746,6 +749,7 @@ export default function App() {
                 dni={dniMiesiaca}
                 wybrany={wybranyDzien}
                 wybranyTydzien={wybranyTydzien}
+                dniZOfertami={dniZOfertami}
                 onWybierz={zaznaczDzien}
                 onWybierzTydzien={zaznaczTydzien}
               />
@@ -817,17 +821,16 @@ export default function App() {
                 wybór dnia, „Cały miesiąc" zdejmuje zawężenie, a gdy już się
                 je zdjęło, w tym samym miejscu pojawia się powrót. */}
             <View style={s.filtr}>
-              <Pressable
-                style={s.filtrGlowny}
-                onPress={() => {
-                  if (dzisiaj !== null) setKalendarzOfert(true);
-                }}
-              >
+              <View style={s.filtrGlowny}>
                 <Text style={s.filtrTekst} numberOfLines={1}>
-                  {zawezenie === null ? 'Cały miesiąc' : `Zawężone do: ${zawezenie}`}
+                  {zawezenie === null ? 'Cały miesiąc' : zawezenie}
                 </Text>
-                <Text style={s.filtrPodpowiedz}>Dotknij, żeby wybrać dzień</Text>
-              </Pressable>
+                <Text style={s.filtrPodpowiedz}>
+                  {ofertyWidoku.length === 1
+                    ? '1 oferta w tym zakresie'
+                    : `${ofertyWidoku.length} ofert w tym zakresie`}
+                </Text>
+              </View>
 
               {zawezenie !== null ? (
                 <Pressable
@@ -868,6 +871,17 @@ export default function App() {
               ) : null}
             </View>
 
+            <Pressable
+              style={({ pressed }) => [s.wybierzDzien, pressed && s.wcisniety]}
+              disabled={dzisiaj === null}
+              onPress={() => setKalendarzOfert(true)}
+            >
+              <Text style={s.wybierzDzienIkona}>📅</Text>
+              <Text style={s.wybierzDzienTekst}>
+                {wybranyDzien === null ? 'Wybierz dzień' : `Zmień dzień · ${krotkaData(wybranyDzien)}`}
+              </Text>
+            </Pressable>
+
             <KartaOfert
               oferty={ofertyWidoku}
               etykieta={etykietaOfert}
@@ -890,6 +904,7 @@ export default function App() {
               okres="MONTHLY"
               tydzien={tydzien}
               dzisiaj={dzisiaj}
+              odniesienie={odniesienie}
               onUstaw={(o, kwota) => {
                 setKwotaCelu(kwota);
                 setCelDoUstawienia(o);
@@ -901,6 +916,7 @@ export default function App() {
               okres="WEEKLY"
               tydzien={tydzien}
               dzisiaj={dzisiaj}
+              odniesienie={odniesienie}
               onUstaw={(o, kwota) => {
                 setKwotaCelu(kwota);
                 setCelDoUstawienia(o);
@@ -1140,6 +1156,19 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   filtrGlowny: { flex: 1 },
+  wybierzDzien: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderColor: C.akcent,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginBottom: 12,
+  },
+  wybierzDzienIkona: { fontSize: 17 },
+  wybierzDzienTekst: { color: C.akcent, fontSize: 15, fontWeight: '700' },
   filtrTekst: { color: C.tekst, fontSize: 13, flexShrink: 1 },
   filtrPodpowiedz: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 2 },
   filtrLink: { color: C.akcent, fontSize: 13, fontWeight: '600' },

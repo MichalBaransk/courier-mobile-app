@@ -2,35 +2,41 @@ import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { godzinyLubMinuty } from './format';
+import { Suwak } from './Suwak';
 import { C } from './theme';
 import {
   czyUstawiony,
   DNI_SKROT,
+  godzinyDnia,
   ileDniRoboczych,
   MAKS_GODZIN_DZIENNIE,
+  naGodzine,
+  opisDnia,
   PROPOZYCJA,
   PUSTY_TYDZIEN,
   sumaTygodnia,
+  type DzienPracy,
   type TydzienPracy as Tydzien,
 } from './tydzienPracy';
 
 /**
  * Edytor tygodnia pracy.
  *
- * Założenie: ustawienie tego ma zająć kilka dotknięć, bo inaczej nikt tego
- * nie ustawi. Stąd dwa poziomy:
+ * Godziny wybiera się SUWAKAMI, nie polami tekstowymi ani przyciskami ±.
+ * Powód jest praktyczny: „od 10:00 do 18:00" to przedział, a przedział
+ * najłatwiej ustawić przeciągając. Osobny suwak na godzinę (krok 1 h)
+ * i osobny na minuty (krok 5 min) — grube ustawienie jednym ruchem,
+ * dokładne drugim.
  *
- * 1. **Zwykły** — dotykasz dni, w które jeździsz, i wybierasz JEDNĄ liczbę
- *    godzin dla wszystkich. Pięć dotknięć i gotowe.
- * 2. **Rozwinięty** — dopiero gdy sam poprosisz, każdy dzień dostaje własne
- *    godziny.
+ * Suwaki są własne (`Suwak.tsx`), bo `@react-native-community/slider` to
+ * moduł natywny, czyli koniec OTA.
  *
- * Domyślnie pokazujemy poziom pierwszy nawet wtedy, gdy zapisane godziny są
- * różne — wtedy pole zbiorcze jest puste, a nie kłamie średnią.
+ * Dwa poziomy, żeby zwykły przypadek zajmował kilka dotknięć:
+ * 1. **Wspólny** — zaznaczasz dni i ustawiasz jeden przedział dla wszystkich.
+ * 2. **Osobno** — dopiero na życzenie każdy dzień dostaje własne godziny.
  */
 
-const PRESETY = [4, 6, 8, 10, 12];
-const KROK = 0.5;
+const DOMYSLNY: DzienPracy = { od: 600, do: 1080 };
 
 interface Props {
   widoczny: boolean;
@@ -39,9 +45,83 @@ interface Props {
   onZamknij: () => void;
 }
 
+/** Cztery suwaki opisujące jeden przedział pracy. */
+function EdytorPrzedzialu({
+  przedzial,
+  onZmien,
+}: {
+  przedzial: DzienPracy;
+  onZmien: (p: DzienPracy) => void;
+}) {
+  const godzin = godzinyDnia(przedzial);
+  const zaDlugo = godzin > MAKS_GODZIN_DZIENNIE;
+
+  return (
+    <View>
+      <Suwak
+        etykieta="Początek — godzina"
+        min={0}
+        maks={23}
+        krok={1}
+        wartosc={Math.floor(przedzial.od / 60)}
+        formatuj={(v) => `${String(v).padStart(2, '0')}:00`}
+        onZmien={(v) => onZmien({ ...przedzial, od: v * 60 + (przedzial.od % 60) })}
+      />
+      <Suwak
+        etykieta="Początek — minuty"
+        min={0}
+        maks={55}
+        krok={5}
+        wartosc={przedzial.od % 60}
+        formatuj={(v) => `${String(v).padStart(2, '0')} min`}
+        onZmien={(v) => onZmien({ ...przedzial, od: Math.floor(przedzial.od / 60) * 60 + v })}
+      />
+
+      <View style={s.kreska} />
+
+      <Suwak
+        etykieta="Koniec — godzina"
+        min={0}
+        maks={23}
+        krok={1}
+        wartosc={Math.floor(przedzial.do / 60)}
+        formatuj={(v) => `${String(v).padStart(2, '0')}:00`}
+        onZmien={(v) => onZmien({ ...przedzial, do: v * 60 + (przedzial.do % 60) })}
+      />
+      <Suwak
+        etykieta="Koniec — minuty"
+        min={0}
+        maks={55}
+        krok={5}
+        wartosc={przedzial.do % 60}
+        formatuj={(v) => `${String(v).padStart(2, '0')} min`}
+        onZmien={(v) => onZmien({ ...przedzial, do: Math.floor(przedzial.do / 60) * 60 + v })}
+      />
+
+      <View style={[s.przedzial, zaDlugo && s.przedzialZly]}>
+        <Text style={[s.przedzialTekst, zaDlugo && s.przedzialTekstZly]}>
+          {naGodzine(przedzial.od)} – {naGodzine(przedzial.do)} · {godzinyLubMinuty(godzin)}
+        </Text>
+        {przedzial.do <= przedzial.od && godzin > 0 ? (
+          <Text style={s.przezPolnoc}>przez północ</Text>
+        ) : null}
+      </View>
+
+      {zaDlugo ? (
+        <Text style={s.ostrzezenie}>
+          {godzinyLubMinuty(godzin)} to dłużej niż {MAKS_GODZIN_DZIENNIE} h — serwer odrzuciłby
+          taką zmianę (§8d). Sprawdź, czy początek i koniec nie są zamienione.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: Props) {
-  const [robocza, setRobocza] = useState<number[]>([...wartosc]);
-  const [rozwiniete, setRozwiniete] = useState(false);
+  const [robocza, setRobocza] = useState<Array<DzienPracy | null>>([...wartosc]);
+  const [osobno, setOsobno] = useState(false);
+  /** Który dzień jest rozwinięty w trybie „osobno". */
+  const [edytowany, setEdytowany] = useState<number | null>(null);
 
   // `Modal` z `visible={false}` zostaje w drzewie, więc stan nie resetuje się
   // sam — bez tego edytor pamiętałby porzucone zmiany z poprzedniego otwarcia.
@@ -50,32 +130,34 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
     setPoprzednioWidoczny(widoczny);
     if (widoczny) {
       setRobocza([...(czyUstawiony(wartosc) ? wartosc : PROPOZYCJA)]);
-      setRozwiniete(false);
+      setOsobno(false);
+      setEdytowany(null);
     }
   }
 
-  const aktywne = robocza.filter((g) => g > 0);
-  /** Wspólne godziny — tylko gdy wszystkie dni robocze mają tę samą wartość. */
-  const wspolne =
-    aktywne.length > 0 && aktywne.every((g) => g === aktywne[0]) ? (aktywne[0] ?? 0) : null;
+  const aktywne = robocza.filter((d): d is DzienPracy => godzinyDnia(d) > 0);
+  /** Wspólny przedział — tylko gdy wszystkie dni robocze mają ten sam. */
+  const wspolny =
+    aktywne.length > 0 && aktywne.every((d) => d.od === aktywne[0]?.od && d.do === aktywne[0]?.do)
+      ? (aktywne[0] ?? DOMYSLNY)
+      : null;
 
   const przelacz = (i: number) => {
     setRobocza((p) => {
       const n = [...p];
-      n[i] = (n[i] ?? 0) > 0 ? 0 : (wspolne ?? 8);
+      n[i] = godzinyDnia(n[i] ?? null) > 0 ? null : (wspolny ?? DOMYSLNY);
       return n;
     });
   };
 
-  const ustawWszystkim = (g: number) => {
-    setRobocza((p) => p.map((stare) => (stare > 0 ? g : 0)));
+  const ustawWszystkim = (przedzial: DzienPracy) => {
+    setRobocza((p) => p.map((d) => (godzinyDnia(d) > 0 ? przedzial : null)));
   };
 
-  const zmienDzien = (i: number, delta: number) => {
+  const ustawDzien = (i: number, przedzial: DzienPracy) => {
     setRobocza((p) => {
       const n = [...p];
-      const nowa = Math.round(((n[i] ?? 0) + delta) * 2) / 2;
-      n[i] = Math.min(MAKS_GODZIN_DZIENNIE, Math.max(0, nowa));
+      n[i] = przedzial;
       return n;
     });
   };
@@ -89,14 +171,14 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
         <ScrollView contentContainerStyle={s.zawartosc}>
           <Text style={s.tytul}>Tydzień pracy</Text>
           <Text style={s.podtytul}>
-            W które dni zwykle jeździsz i po ile godzin. Służy WYŁĄCZNIE do rozłożenia celu na
-            dni, w które faktycznie pracujesz — nie zmienia tego, ile zarobiłeś.
+            W które dni i w jakich godzinach zwykle jeździsz. Służy WYŁĄCZNIE do rozłożenia celu
+            na dni, w które faktycznie pracujesz — nie zmienia tego, ile zarobiłeś.
           </Text>
 
           <Text style={s.etykieta}>Dni robocze</Text>
           <View style={s.chipy}>
             {DNI_SKROT.map((d, i) => {
-              const wlaczony = (robocza[i] ?? 0) > 0;
+              const wlaczony = godzinyDnia(robocza[i] ?? null) > 0;
               return (
                 <Pressable
                   key={d}
@@ -115,60 +197,50 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
             </Text>
           ) : null}
 
-          {!rozwiniete ? (
+          {!osobno ? (
             <>
-              <Text style={s.etykieta}>Godzin w dniu roboczym</Text>
-              <View style={s.chipy}>
-                {PRESETY.map((g) => (
-                  <Pressable
-                    key={g}
-                    style={[s.chip, wspolne === g && s.chipAktywny]}
-                    onPress={() => ustawWszystkim(g)}
-                  >
-                    <Text style={[s.chipTekst, wspolne === g && s.chipTekstAktywny]}>{g} h</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <View style={s.krokRzad}>
-                <Pressable style={s.krokPrzycisk} onPress={() => ustawWszystkim(Math.max(KROK, (wspolne ?? 8) - KROK))}>
-                  <Text style={s.krokTekst}>−</Text>
-                </Pressable>
-                <Text style={s.krokWartosc}>
-                  {wspolne === null ? 'różne' : godzinyLubMinuty(wspolne)}
+              <Text style={s.etykieta}>Godziny pracy — wspólne dla zaznaczonych dni</Text>
+              {wspolny === null && aktywne.length > 0 ? (
+                <Text style={s.uwaga}>
+                  Dni mają teraz różne godziny. Ruszenie suwaka ustawi wszystkim tę samą wartość.
                 </Text>
-                <Pressable
-                  style={s.krokPrzycisk}
-                  onPress={() => ustawWszystkim(Math.min(MAKS_GODZIN_DZIENNIE, (wspolne ?? 8) + KROK))}
-                >
-                  <Text style={s.krokTekst}>+</Text>
-                </Pressable>
-              </View>
+              ) : null}
+              <EdytorPrzedzialu przedzial={wspolny ?? DOMYSLNY} onZmien={ustawWszystkim} />
 
-              <Pressable style={s.link} onPress={() => setRozwiniete(true)}>
+              <Pressable style={s.link} onPress={() => setOsobno(true)}>
                 <Text style={s.linkTekst}>Różne godziny w różne dni ›</Text>
               </Pressable>
             </>
           ) : (
             <>
               <Text style={s.etykieta}>Godziny osobno dla każdego dnia</Text>
-              {DNI_SKROT.map((d, i) =>
-                (robocza[i] ?? 0) > 0 ? (
-                  <View key={d} style={s.wierszDnia}>
-                    <Text style={s.nazwaDnia}>{d}</Text>
-                    <View style={s.krokRzad}>
-                      <Pressable style={s.krokPrzycisk} onPress={() => zmienDzien(i, -KROK)}>
-                        <Text style={s.krokTekst}>−</Text>
-                      </Pressable>
-                      <Text style={s.krokWartosc}>{godzinyLubMinuty(robocza[i] ?? 0)}</Text>
-                      <Pressable style={s.krokPrzycisk} onPress={() => zmienDzien(i, KROK)}>
-                        <Text style={s.krokTekst}>+</Text>
-                      </Pressable>
-                    </View>
+              {DNI_SKROT.map((nazwa, i) => {
+                const d = robocza[i] ?? null;
+                if (godzinyDnia(d) <= 0 || d === null) return null;
+                const otwarty = edytowany === i;
+
+                return (
+                  <View key={nazwa} style={s.blokDnia}>
+                    <Pressable
+                      style={s.naglowekDnia}
+                      onPress={() => setEdytowany(otwarty ? null : i)}
+                    >
+                      <Text style={s.nazwaDnia}>{nazwa}</Text>
+                      <Text style={s.godzinyDnia}>{opisDnia(d)}</Text>
+                      <Text style={s.strzalkaDnia}>{otwarty ? '▾' : '▸'}</Text>
+                    </Pressable>
+
+                    {otwarty ? (
+                      <EdytorPrzedzialu
+                        przedzial={d}
+                        onZmien={(p) => ustawDzien(i, p)}
+                      />
+                    ) : null}
                   </View>
-                ) : null
-              )}
-              <Pressable style={s.link} onPress={() => setRozwiniete(false)}>
+                );
+              })}
+
+              <Pressable style={s.link} onPress={() => setOsobno(false)}>
                 <Text style={s.linkTekst}>‹ Wspólne godziny dla wszystkich dni</Text>
               </Pressable>
             </>
@@ -193,12 +265,7 @@ export function EdytorTygodniaPracy({ widoczny, wartosc, onZapisz, onZamknij }: 
             <Text style={s.wtornyTekst}>Anuluj</Text>
           </Pressable>
 
-          <Pressable
-            style={s.wyczysc}
-            onPress={() => {
-              onZapisz(PUSTY_TYDZIEN);
-            }}
-          >
+          <Pressable style={s.wyczysc} onPress={() => onZapisz(PUSTY_TYDZIEN)}>
             <Text style={s.wyczyscTekst}>Wyłącz tydzień pracy</Text>
           </Pressable>
         </ScrollView>
@@ -212,7 +279,13 @@ const s = StyleSheet.create({
   zawartosc: { padding: 20, paddingTop: 56, paddingBottom: 40 },
 
   tytul: { color: C.tekst, fontSize: 24, fontWeight: '700' },
-  podtytul: { color: C.tekstPrzygaszony, fontSize: 12, marginTop: 6, lineHeight: 17, marginBottom: 20 },
+  podtytul: {
+    color: C.tekstPrzygaszony,
+    fontSize: 12,
+    marginTop: 6,
+    lineHeight: 17,
+    marginBottom: 20,
+  },
 
   etykieta: { color: C.tekstPrzygaszony, fontSize: 13, marginBottom: 8 },
   chipy: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 },
@@ -230,36 +303,48 @@ const s = StyleSheet.create({
   chipTekst: { color: C.tekstPrzygaszony, fontSize: 14, fontWeight: '600' },
   chipTekstAktywny: { color: C.tlo },
 
-  krokRzad: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  krokPrzycisk: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
+  kreska: { height: 1, backgroundColor: C.obramowanie, marginVertical: 10 },
+
+  przedzial: {
     backgroundColor: C.karta,
     borderColor: C.obramowanie,
     borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  krokTekst: { color: C.tekst, fontSize: 22, fontWeight: '700' },
-  krokWartosc: {
-    color: C.tekst,
+  przedzialZly: { borderColor: C.blad },
+  przedzialTekst: {
+    color: C.akcent,
     fontSize: 17,
-    fontWeight: '600',
-    minWidth: 110,
-    textAlign: 'center',
+    fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
+  przedzialTekstZly: { color: C.blad },
+  przezPolnoc: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 3 },
 
-  wierszDnia: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  blokDnia: {
+    backgroundColor: C.karta,
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
     marginBottom: 10,
   },
-  nazwaDnia: { color: C.tekst, fontSize: 15, fontWeight: '600', width: 48 },
+  naglowekDnia: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  nazwaDnia: { color: C.tekst, fontSize: 15, fontWeight: '700', width: 40 },
+  godzinyDnia: {
+    flex: 1,
+    color: C.tekstPrzygaszony,
+    fontSize: 14,
+    fontVariant: ['tabular-nums'],
+  },
+  strzalkaDnia: { color: C.tekstPrzygaszony, fontSize: 13 },
 
-  ostrzezenie: { color: C.ostrzezenie, fontSize: 12, marginTop: -10, marginBottom: 16, lineHeight: 17 },
+  ostrzezenie: { color: C.ostrzezenie, fontSize: 12, marginTop: 10, lineHeight: 17 },
+  uwaga: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: -4, marginBottom: 8, lineHeight: 16 },
 
   link: { paddingVertical: 16 },
   linkTekst: { color: C.akcent, fontSize: 14, fontWeight: '600' },

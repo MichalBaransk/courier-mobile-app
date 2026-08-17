@@ -144,7 +144,9 @@ export function DodajWpis({
    * (a do tego przeskok do zakładki dnia) było najbardziej uciążliwą rzeczą
    * w poprzedniej wersji.
    */
-  const [wSesji, setWSesji] = useState<Array<{ rodzaj: Rodzaj; opis: string }>>([]);
+  const [wSesji, setWSesji] = useState<Array<{ rodzaj: Rodzaj; data: string | null; opis: string }>>(
+    []
+  );
   /** Kasowanie dnia wymaga drugiego dotknięcia — bez cofania. */
   const [potwierdzKasowanie, setPotwierdzKasowanie] = useState(false);
   /** Które pole godziny otwarło zegar: `od`, `do`, albo żadne. */
@@ -297,6 +299,18 @@ export function DodajWpis({
    */
   const NADPISUJACE: Rodzaj[] = ['dystans', 'brutto', 'zmiana'];
 
+  /**
+   * Usuwa z listy sesji wpis, który właśnie zostanie nadpisany.
+   *
+   * Tylko ten sam rodzaj W TYM SAMYM DNIU — inaczej zapisanie brutto na
+   * 2 sierpnia kasowałoby z listy brutto z 1 sierpnia, choć oba są w bazie.
+   */
+  const zastapWSesji = (
+    lista: Array<{ rodzaj: Rodzaj; data: string | null; opis: string }>,
+    r: Rodzaj,
+    d: string | null
+  ) => (NADPISUJACE.includes(r) ? lista.filter((w) => !(w.rodzaj === r && w.data === d)) : lista);
+
   const zapisz = async () => {
     setBlad(null);
 
@@ -307,7 +321,16 @@ export function DodajWpis({
       return;
     }
 
-    const poprzedni = wSesji.find((w) => w.rodzaj === rodzaj);
+    /**
+     * Ostrzeżenie o nadpisaniu dotyczy TEGO SAMEGO RODZAJU W TYM SAMYM DNIU.
+     *
+     * Brutto 500 zł na 1 sierpnia i brutto 300 zł na 2 sierpnia to dwa
+     * niezależne wpisy — serwer trzyma je w osobnych wierszach `daily_records`
+     * i jeden drugiego nie nadpisze. Wcześniej klucz był sam `rodzaj`, więc
+     * druga kwota fałszywie alarmowała i wymagała potwierdzenia, choć nic
+     * nie było zagrożone.
+     */
+    const poprzedni = wSesji.find((w) => w.rodzaj === rodzaj && w.data === wybranaData);
     const oNadpisaniu =
       NADPISUJACE.includes(rodzaj) && poprzedni
         ? `W tej sesji zapisałeś już: ${poprzedni.opis}. Serwer nadpisze tamtą wartość.`
@@ -339,10 +362,7 @@ export function DodajWpis({
     setZapisuje(true);
     try {
       const wynik = await gotowe.zadanie(klucz);
-      setWSesji((lista) => [
-        ...lista.filter((w) => w.rodzaj !== rodzaj || !NADPISUJACE.includes(rodzaj)),
-        { rodzaj, opis },
-      ]);
+      setWSesji((lista) => [...zastapWSesji(lista, rodzaj, wybranaData), { rodzaj, data: wybranaData, opis }]);
       wyczysc();
       onZapisano(wynik);
     } catch (err) {
@@ -360,8 +380,8 @@ export function DodajWpis({
         });
         if (komunikat !== null) {
           setWSesji((lista) => [
-            ...lista.filter((w) => w.rodzaj !== rodzaj || !NADPISUJACE.includes(rodzaj)),
-            { rodzaj, opis: `${opis} — czeka na wysłanie` },
+            ...zastapWSesji(lista, rodzaj, wybranaData),
+            { rodzaj, data: wybranaData, opis: `${opis} — czeka na wysłanie` },
           ]);
           wyczysc();
           setBlad(null);
@@ -377,6 +397,14 @@ export function DodajWpis({
   };
 
   /** Krótki opis tego, co właśnie poszło — do listy „zapisane w tej sesji". */
+  /** `dzisiaj`, `wczoraj` albo `sob 15 sie` — do listy „zapisane w tej sesji". */
+  const etykietaDnia = (d: string | null): string => {
+    if (d === null) return 'dzisiaj';
+    if (d === DATA_TESTOWA) return 'test';
+    if (dzisiaj !== null && d === przesunDate(dzisiaj, -1)) return 'wczoraj';
+    return krotkaData(d);
+  };
+
   const opisWpisu = (): string => {
     if (rodzaj === 'zmiana') {
       return `zmiana ${normalizujGodzine(od) ?? '…'}–${normalizujGodzine(doGodz) ?? '…'}`;
@@ -632,9 +660,12 @@ export function DodajWpis({
           {wSesji.length > 0 ? (
             <View style={s.sesja}>
               <Text style={s.sesjaNaglowek}>Zapisane w tej sesji ({wSesji.length})</Text>
+              <Text style={s.sesjaPodpowiedz}>
+                Dzień możesz zmieniać między zapisami — każdy wpis pamięta swój.
+              </Text>
               {wSesji.map((w, i) => (
-                <Text key={`${w.rodzaj}-${i}`} style={s.sesjaPozycja}>
-                  • {w.opis}
+                <Text key={`${w.rodzaj}-${w.data ?? 'dzis'}-${i}`} style={s.sesjaPozycja}>
+                  • {w.opis} · {etykietaDnia(w.data)}
                 </Text>
               ))}
             </View>
@@ -780,6 +811,7 @@ const s = StyleSheet.create({
   },
   sesjaNaglowek: { color: C.akcent, fontSize: 12, fontWeight: '700', marginBottom: 6 },
   sesjaPozycja: { color: C.tekstPrzygaszony, fontSize: 13, lineHeight: 19 },
+  sesjaPodpowiedz: { color: C.obramowanie, fontSize: 11, marginBottom: 6 },
 
   gotowe: {
     borderColor: C.obramowanie,

@@ -18,7 +18,7 @@ import { ocenLiczbe } from './limity';
 import { C } from './theme';
 import { przesunDate } from './format';
 import { czyUstawiony, opisDni, rozlozCel, type TydzienPracy } from './tydzienPracy';
-import type { TargetProgress } from './types';
+import type { PeriodSummary, TargetProgress } from './types';
 
 /**
  * Cele zarobkowe — pasek postępu i ustawianie kwoty.
@@ -52,6 +52,7 @@ export function KartaCelu({
   okres,
   tydzien,
   dzisiaj,
+  odniesienie,
   onUstaw,
 }: {
   postep: TargetProgress | null;
@@ -62,6 +63,20 @@ export function KartaCelu({
   tydzien: TydzienPracy;
   /** Dzisiejsza data według SERWERA — początek zakresu do rozłożenia celu. */
   dzisiaj: string | null;
+  /**
+   * Podsumowanie ostatnich 30 dni — awaryjne źródło stawki zł/h.
+   *
+   * Serwer, gdy w bieżącym okresie nie ma jeszcze przepracowanych godzin,
+   * podstawia STAŁĄ z konfiguracji (`FALLBACK_HOURLY_RATE_NETTO`). Przy celu
+   * tygodniowym trafia się to co poniedziałek: tydzień dopiero się zaczął,
+   * więc prognoza „ile godzin trzeba" opierała się na liczbie wziętej
+   * z sufitu, a nie na tym, jak ten kurier realnie jeździ.
+   *
+   * Tutaj w takim wypadku bierzemy średnią z ostatnich 30 dni. To nadal
+   * WARSTWA PREZENTACJI — `remainingNetto` i `progressPercent` zostają
+   * dokładnie takie, jakie przysłał serwer.
+   */
+  odniesienie: PeriodSummary | null;
   onUstaw: (okres: 'MONTHLY' | 'WEEKLY', biezacaKwota: number | null) => void;
 }) {
   if (postep === null) {
@@ -88,7 +103,29 @@ export function KartaCelu({
    * więc dzielenie tutaj nie duplikuje żadnej reguły biznesowej — poprawia
    * tylko rozdzielczość tego, co i tak jest już policzone.
    */
-  const godzinDziennie = iloraz(postep.estimatedHoursRemaining, postep.daysRemaining);
+  /**
+   * Stawka, według której prognozujemy godziny.
+   *
+   * Kolejność: własna z bieżącego okresu → średnia z 30 dni → stała serwera.
+   * Każdy krok w dół jest gorszy, ale każdy jest lepszy od liczby wziętej
+   * z sufitu, więc schodzimy tylko wtedy, gdy poprzedniej nie ma.
+   */
+  const zOdniesienia =
+    postep.usedFallbackRate &&
+    odniesienie !== null &&
+    odniesienie.totalWorkHours > 0 &&
+    odniesienie.avgHourlyRateNetto > 0;
+
+  const stawka = zOdniesienia
+    ? (odniesienie?.avgHourlyRateNetto ?? postep.avgHourlyRate)
+    : postep.avgHourlyRate;
+
+  /** Godziny potrzebne przy powyższej stawce — serwerowe, gdy stawka bez zmian. */
+  const godzinyPotrzebne = zOdniesienia
+    ? (iloraz(postep.remainingNetto, stawka) ?? postep.estimatedHoursRemaining)
+    : postep.estimatedHoursRemaining;
+
+  const godzinDziennie = iloraz(godzinyPotrzebne, postep.daysRemaining);
 
   /**
    * Rozłożenie celu na dni ROBOCZE, gdy tydzień pracy jest ustawiony.
@@ -103,7 +140,7 @@ export function KartaCelu({
       ? rozlozCel(
           tydzien,
           postep.remainingNetto,
-          postep.estimatedHoursRemaining,
+          godzinyPotrzebne,
           dzisiaj,
           przesunDate(dzisiaj, Math.max(0, postep.daysRemaining - 1))
         )
@@ -177,11 +214,8 @@ export function KartaCelu({
                   godzinDziennie === null ? '—' : `${godzinyLubMinuty(godzinDziennie)} dziennie`
                 }
               />
-              {postep.estimatedHoursRemaining > 0 ? (
-                <Wiersz
-                  etykieta="Do końca okresu"
-                  wartosc={godzinyLubMinuty(postep.estimatedHoursRemaining)}
-                />
+              {godzinyPotrzebne > 0 ? (
+                <Wiersz etykieta="Do końca okresu" wartosc={godzinyLubMinuty(godzinyPotrzebne)} />
               ) : null}
             </>
           )}
@@ -201,9 +235,11 @@ export function KartaCelu({
           ) : null}
 
           <Text style={s.przypis}>
-            {postep.usedFallbackRate
-              ? `Przeliczone stawką domyślną ${zl(postep.avgHourlyRate)}/h — brak własnych godzin w tym okresie.`
-              : `Przy Twojej stawce ${zl(postep.avgHourlyRate)}/h z tego okresu.`}
+            {zOdniesienia
+              ? `Przy Twojej stawce ${zl(stawka)}/h z ostatnich 30 dni — w tym okresie nie ma jeszcze przepracowanych godzin.`
+              : postep.usedFallbackRate
+                ? `Przeliczone stawką domyślną ${zl(stawka)}/h — brak własnych godzin i za mało historii, żeby ją wyliczyć.`
+                : `Przy Twojej stawce ${zl(stawka)}/h z tego okresu.`}
             {plan !== null ? ` Rozłożone na dni robocze: ${opisDni(tydzien)}.` : ''}
           </Text>
         </>
