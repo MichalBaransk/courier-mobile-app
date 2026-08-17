@@ -86,6 +86,15 @@ interface Props {
    * jeszcze się nie wczytała — wtedy zostaje tylko zapis na dzisiaj.
    */
   dzisiaj: string | null;
+  /**
+   * Dzień zaznaczony w kalendarzu — formularz otwiera się od razu na nim.
+   *
+   * `null` znaczy „brak zaznaczenia", czyli domyślnie dzisiaj. Kurier, który
+   * ogląda wtorek i dotyka „Dodaj wpis", chce dopisać coś do wtorku, a nie
+   * do dzisiaj — a przestawianie daty przy każdym wpisie to najłatwiejsza
+   * droga do wpisu w złym dniu.
+   */
+  domyslnaData: string | null;
   onZamknij: () => void;
   onZapisano: (wynik: ZapisOdpowiedz) => void;
   /**
@@ -109,10 +118,17 @@ export function DodajWpis({
   widoczny,
   token,
   dzisiaj,
+  domyslnaData,
   onZamknij,
   onZapisano,
   onDoKolejki,
 }: Props) {
+  /**
+   * `null` zawsze znaczy „dzisiaj wyznaczone PO STRONIE SERWERA" (§8a).
+   * Dlatego zaznaczenie równe dzisiejszej dacie zostawiamy jako `null` —
+   * zegar telefonu nadal nie decyduje o niczym.
+   */
+  const startowaData = domyslnaData !== null && domyslnaData !== dzisiaj ? domyslnaData : null;
   const [rodzaj, setRodzaj] = useState<Rodzaj>('napiwek');
   const [kwota, setKwota] = useState('');
   const [litry, setLitry] = useState('');
@@ -140,8 +156,21 @@ export function DodajWpis({
   const [nadpisanie, setNadpisanie] = useState<string | null>(null);
 
   /** `null` = dzisiaj, czyli data wyznaczona po stronie serwera. */
-  const [wybranaData, setWybranaData] = useState<string | null>(null);
+  const [wybranaData, setWybranaData] = useState<string | null>(startowaData);
   const [kalendarz, setKalendarz] = useState(false);
+
+  /**
+   * Ponowne otwarcie formularza ma znowu trafić w dzień z kalendarza.
+   *
+   * `Modal` z `visible={false}` zostaje w drzewie, więc stan nie resetuje się
+   * sam. Bez tego wystarczyło raz zmienić dzień w formularzu, żeby przy
+   * następnym otwarciu została stara wartość, a nie ta z kalendarza.
+   */
+  const [poprzednioWidoczny, setPoprzednioWidoczny] = useState(false);
+  if (widoczny !== poprzednioWidoczny) {
+    setPoprzednioWidoczny(widoczny);
+    if (widoczny) setWybranaData(startowaData);
+  }
 
   const wyczysc = () => {
     setKwota('');
@@ -155,7 +184,7 @@ export function DodajWpis({
   /** Zamknięcie modalu resetuje też wybór dnia — inaczej „wczoraj" zostałoby na potem. */
   const wyczyscWszystko = () => {
     wyczysc();
-    setWybranaData(null);
+    setWybranaData(startowaData);
     setKalendarz(false);
     setWSesji([]);
     setPotwierdzKasowanie(false);

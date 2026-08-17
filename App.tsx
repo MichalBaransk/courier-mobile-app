@@ -53,9 +53,13 @@ import { DodajWpis } from './src/DodajWpis';
 import { EkranTokena } from './src/EkranTokena';
 import { KartaDnia, KartaOkresu, KartaSalda, SzczegolyTygodnia } from './src/Karty';
 import { KartaCelu, UstawCel } from './src/Cele';
+import { EdytorTygodniaPracy } from './src/TydzienPracy';
+import { czyUstawiony, opisDni, sumaTygodnia, PUSTY_TYDZIEN, type TydzienPracy } from './src/tydzienPracy';
+import { wczytajTydzien, zapiszTydzien } from './src/tydzienPracyMagazyn';
 import { KartaOfert } from './src/Oferty';
 import { KartaAnalizyDnia, PorownanieOkresow } from './src/Analiza';
 import { UsunWpisy } from './src/UsunWpisy';
+import { WybierzDate } from './src/WybierzDate';
 import { PasekSekcji, type Sekcja } from './src/Nawigacja';
 import { KalendarzMiesiaca } from './src/Wykresy';
 import { C } from './src/theme';
@@ -70,6 +74,12 @@ import type {
 } from './src/types';
 
 type Stan = 'wczytywanie' | 'brakTokena' | 'gotowe';
+
+/** Co jest zaznaczone w kalendarzu: konkretny dzień albo cały tydzień. */
+type Zaznaczenie = { rodzaj: 'dzien'; wartosc: string } | { rodzaj: 'tydzien'; wartosc: string };
+
+/** Klucz mapy zaznaczeń — `2026-08`. */
+const kluczMiesiaca = (iso: string): string => iso.slice(0, 7);
 
 /**
  * Blokada równoległych wysyłek kolejki.
@@ -201,9 +211,26 @@ export default function App() {
    * razem z paskiem, więc nie było czego dotknąć, żeby wrócić do dnia,
    * na który się patrzyło.
    */
-  const [poprzednieZawezenie, setPoprzednieZawezenie] = useState<
-    { rodzaj: 'dzien' | 'tydzien'; wartosc: string } | null
-  >(null);
+  const [poprzednieZawezenie, setPoprzednieZawezenie] = useState<Zaznaczenie | null>(null);
+
+  /**
+   * Zaznaczenie zapamiętane OSOBNO DLA KAŻDEGO MIESIĄCA, kluczem `RRRR-MM`.
+   *
+   * Przechodząc na inny miesiąc chcemy zobaczyć jego podsumowanie, a nie
+   * przypadkowy dzień o tym samym numerze. Ale wracając tam, gdzie się już
+   * było, chcemy zastać to, co się oglądało. Jedno wspólne zaznaczenie nie
+   * potrafi obu naraz — stąd mapa.
+   *
+   * Żyje tylko w pamięci procesu. Po restarcie aplikacji zaczynamy od
+   * dzisiejszego dnia i to jest w porządku: to wygoda w obrębie sesji,
+   * nie ustawienie do zapamiętania na stałe.
+   */
+  const [pamiecMiesiecy, setPamiecMiesiecy] = useState<Record<string, Zaznaczenie | null>>({});
+  /** Kalendarz otwierany z sekcji ofert — żeby nie trzeba było wracać do zakładki. */
+  const [kalendarzOfert, setKalendarzOfert] = useState(false);
+  /** Tydzień pracy — ustawienie lokalne, wpływa tylko na rozłożenie celu. */
+  const [tydzien, setTydzien] = useState<TydzienPracy>(PUSTY_TYDZIEN);
+  const [edytorTygodnia, setEdytorTygodnia] = useState(false);
   const [kwotaCelu, setKwotaCelu] = useState<number | null>(null);
 
   useEffect(() => {
@@ -244,6 +271,12 @@ export default function App() {
   const ustawKolejke = useCallback((nowa: WpisKolejki[]) => {
     setKolejka(nowa);
     void zapiszKolejke(nowa).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      setTydzien(await wczytajTydzien());
+    })();
   }, []);
 
   const obsluzBlad = useCallback(async (err: unknown) => {
@@ -374,13 +407,25 @@ export default function App() {
   const przesunMiesiac = useCallback(
     (kierunek: -1 | 1) => {
       if (miesiac === null) return;
+
+      const biezace: Zaznaczenie | null =
+        wybranyDzien !== null
+          ? { rodzaj: 'dzien', wartosc: wybranyDzien }
+          : wybranyTydzien !== null
+            ? { rodzaj: 'tydzien', wartosc: wybranyTydzien }
+            : null;
+
+      const nowy = przesunDate(zakresMiesiaca(miesiac).od, kierunek === 1 ? 32 : -1);
+      const zapamietane = pamiecMiesiecy[kluczMiesiaca(nowy)] ?? null;
+
+      setPamiecMiesiecy((p) => ({ ...p, [kluczMiesiaca(miesiac)]: biezace }));
       setPotwierdzenie(null);
-      setWybranyDzien(null);
-      setWybranyTydzien(null);
       setPoprzednieZawezenie(null);
-      setMiesiac(przesunDate(zakresMiesiaca(miesiac).od, kierunek === 1 ? 32 : -1));
+      setWybranyDzien(zapamietane?.rodzaj === 'dzien' ? zapamietane.wartosc : null);
+      setWybranyTydzien(zapamietane?.rodzaj === 'tydzien' ? zapamietane.wartosc : null);
+      setMiesiac(nowy);
     },
-    [miesiac]
+    [miesiac, wybranyDzien, wybranyTydzien, pamiecMiesiecy]
   );
 
   const odswiez = useCallback(async () => {
@@ -434,6 +479,36 @@ export default function App() {
     setPoprzednieZawezenie(null);
     setWybranyDzien((poprzedni) => (poprzedni === data ? null : data));
   }, []);
+
+  /**
+   * Wybór dnia z kalendarza w modalu (sekcja ofert).
+   *
+   * Różni się od `zaznaczDzien` dwiema rzeczami. Po pierwsze NIE przełącza —
+   * dotknięcie dnia, który już jest wybrany, ma go zostawić, a nie odznaczyć;
+   * w modalu to byłoby zaskoczenie. Po drugie potrafi przeskoczyć na inny
+   * miesiąc: modal pozwala przewijać kalendarz, a bez zmiany `miesiac` lista
+   * ofert nadal pokazywałaby zakres, którego nie widać.
+   */
+  const wybierzDzienZKalendarza = useCallback(
+    (data: string) => {
+      setPotwierdzenie(null);
+      setPoprzednieZawezenie(null);
+      setWybranyTydzien(null);
+      setWybranyDzien(data);
+
+      if (miesiac !== null && kluczMiesiaca(data) !== kluczMiesiaca(miesiac)) {
+        const biezace: Zaznaczenie | null =
+          wybranyDzien !== null
+            ? { rodzaj: 'dzien', wartosc: wybranyDzien }
+            : wybranyTydzien !== null
+              ? { rodzaj: 'tydzien', wartosc: wybranyTydzien }
+              : null;
+        setPamiecMiesiecy((p) => ({ ...p, [kluczMiesiaca(miesiac)]: biezace }));
+        setMiesiac(data);
+      }
+    },
+    [miesiac, wybranyDzien, wybranyTydzien]
+  );
 
   const zaznaczTydzien = useCallback((pn: string) => {
     setPotwierdzenie(null);
@@ -738,11 +813,23 @@ export default function App() {
         {/* ================= OFERTY ============================================== */}
         {sekcja === 'oferty' ? (
           <>
-            {zawezenie !== null ? (
-              <View style={s.filtr}>
+            {/* Belka zakresu — bez wracania do kalendarza. Dotknięcie otwiera
+                wybór dnia, „Cały miesiąc" zdejmuje zawężenie, a gdy już się
+                je zdjęło, w tym samym miejscu pojawia się powrót. */}
+            <View style={s.filtr}>
+              <Pressable
+                style={s.filtrGlowny}
+                onPress={() => {
+                  if (dzisiaj !== null) setKalendarzOfert(true);
+                }}
+              >
                 <Text style={s.filtrTekst} numberOfLines={1}>
-                  Zawężone do: {zawezenie}
+                  {zawezenie === null ? 'Cały miesiąc' : `Zawężone do: ${zawezenie}`}
                 </Text>
+                <Text style={s.filtrPodpowiedz}>Dotknij, żeby wybrać dzień</Text>
+              </Pressable>
+
+              {zawezenie !== null ? (
                 <Pressable
                   onPress={() => {
                     setPoprzednieZawezenie(
@@ -758,12 +845,7 @@ export default function App() {
                 >
                   <Text style={s.filtrLink}>Cały miesiąc</Text>
                 </Pressable>
-              </View>
-            ) : poprzednieZawezenie !== null ? (
-              <View style={s.filtr}>
-                <Text style={s.filtrTekst} numberOfLines={1}>
-                  Cały miesiąc
-                </Text>
+              ) : poprzednieZawezenie !== null ? (
                 <Pressable
                   onPress={() => {
                     if (poprzednieZawezenie.rodzaj === 'dzien') {
@@ -777,14 +859,14 @@ export default function App() {
                   }}
                 >
                   <Text style={s.filtrLink}>
-                    ‹ Wróć do:{' '}
+                    ‹{' '}
                     {poprzednieZawezenie.rodzaj === 'dzien'
                       ? krotkaData(poprzednieZawezenie.wartosc)
                       : `tyg. ${numerTygodniaISO(poprzednieZawezenie.wartosc)}`}
                   </Text>
                 </Pressable>
-              </View>
-            ) : null}
+              ) : null}
+            </View>
 
             <KartaOfert
               oferty={ofertyWidoku}
@@ -793,8 +875,8 @@ export default function App() {
             />
 
             <Text style={s.podpowiedz}>
-              Zaznaczenie dnia albo tygodnia w kalendarzu zawęża też tę listę. Strzałki u góry
-              przesuwają miesiąc.
+              Zakres jest wspólny z kalendarzem — zaznaczenie zrobione tutaj widać też tam.
+              Strzałki u góry przesuwają miesiąc.
             </Text>
           </>
         ) : null}
@@ -806,6 +888,8 @@ export default function App() {
               postep={cele?.miesiac ?? null}
               etykieta="CEL MIESIĘCZNY"
               okres="MONTHLY"
+              tydzien={tydzien}
+              dzisiaj={dzisiaj}
               onUstaw={(o, kwota) => {
                 setKwotaCelu(kwota);
                 setCelDoUstawienia(o);
@@ -815,11 +899,34 @@ export default function App() {
               postep={cele?.tydzien ?? null}
               etykieta="CEL TYGODNIOWY"
               okres="WEEKLY"
+              tydzien={tydzien}
+              dzisiaj={dzisiaj}
               onUstaw={(o, kwota) => {
                 setKwotaCelu(kwota);
                 setCelDoUstawienia(o);
               }}
             />
+
+            <Pressable style={s.kartaTygodnia} onPress={() => setEdytorTygodnia(true)}>
+              <Text style={s.naglowekMaly}>TYDZIEŃ PRACY</Text>
+              {czyUstawiony(tydzien) ? (
+                <>
+                  <Text style={s.tydzienGlowny}>{opisDni(tydzien)}</Text>
+                  <Text style={s.tydzienPodpis}>
+                    {sumaTygodnia(tydzien).toFixed(1).replace('.', ',')} h w tygodniu · dotknij,
+                    żeby zmienić
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={s.tydzienGlowny}>Nie ustawiono</Text>
+                  <Text style={s.tydzienPodpis}>
+                    Ustaw dni i godziny, w które zwykle jeździsz — cel rozłoży się na nie zamiast
+                    na wszystkie dni kalendarza.
+                  </Text>
+                </>
+              )}
+            </Pressable>
 
             <Text style={s.podpowiedz}>
               Postęp celu serwer liczy zawsze dla BIEŻĄCEGO okresu — przewijanie kalendarza
@@ -866,6 +973,7 @@ export default function App() {
             widoczny={dodawanie}
             token={token}
             dzisiaj={dzisiaj}
+            domyslnaData={wybranyDzien}
             onZamknij={() => setDodawanie(false)}
             onZapisano={(wynik: ZapisOdpowiedz) => {
               // Modal zostaje otwarty — zamyka go dopiero „Gotowe".
@@ -886,6 +994,33 @@ export default function App() {
             onUsunieto={(wynik: UsunOdpowiedz) => {
               poZmianie(wynik.dzien, null);
             }}
+          />
+
+          {dzisiaj !== null ? (
+            <WybierzDate
+              widoczny={kalendarzOfert}
+              wartosc={wybranyDzien}
+              maks={dzisiaj}
+              onWybierz={(data) => {
+                wybierzDzienZKalendarza(data);
+                setKalendarzOfert(false);
+              }}
+              onZamknij={() => setKalendarzOfert(false)}
+            />
+          ) : null}
+
+          <EdytorTygodniaPracy
+            widoczny={edytorTygodnia}
+            wartosc={tydzien}
+            onZapisz={(t) => {
+              setTydzien(t);
+              void zapiszTydzien(t).catch(() => {});
+              setEdytorTygodnia(false);
+              setPotwierdzenie(
+                czyUstawiony(t) ? 'Zapisano tydzień pracy.' : 'Tydzień pracy wyłączony.'
+              );
+            }}
+            onZamknij={() => setEdytorTygodnia(false)}
           />
 
           <UstawCel
@@ -1004,10 +1139,30 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 12,
   },
-  filtrTekst: { color: C.tekstPrzygaszony, fontSize: 13, flexShrink: 1 },
+  filtrGlowny: { flex: 1 },
+  filtrTekst: { color: C.tekst, fontSize: 13, flexShrink: 1 },
+  filtrPodpowiedz: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 2 },
   filtrLink: { color: C.akcent, fontSize: 13, fontWeight: '600' },
 
   podpowiedz: { color: C.tekstPrzygaszony, fontSize: 11, lineHeight: 16, paddingHorizontal: 4 },
+
+  kartaTygodnia: {
+    backgroundColor: C.karta,
+    borderColor: C.obramowanie,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+  },
+  naglowekMaly: {
+    color: C.tekstPrzygaszony,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginBottom: 10,
+  },
+  tydzienGlowny: { color: C.tekst, fontSize: 17, fontWeight: '700', textTransform: 'capitalize' },
+  tydzienPodpis: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 6, lineHeight: 16 },
 
   pustaSekcja: {
     backgroundColor: C.karta,

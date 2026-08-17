@@ -16,6 +16,8 @@ import { godzinyLubMinuty, zl } from './format';
 import { iloraz, skonczona } from './licz';
 import { ocenLiczbe } from './limity';
 import { C } from './theme';
+import { przesunDate } from './format';
+import { czyUstawiony, opisDni, rozlozCel, type TydzienPracy } from './tydzienPracy';
 import type { TargetProgress } from './types';
 
 /**
@@ -48,12 +50,18 @@ export function KartaCelu({
   postep,
   etykieta,
   okres,
+  tydzien,
+  dzisiaj,
   onUstaw,
 }: {
   postep: TargetProgress | null;
   /** `CEL MIESIĘCZNY` albo `CEL TYGODNIOWY`. */
   etykieta: string;
   okres: 'MONTHLY' | 'WEEKLY';
+  /** Tydzień pracy; puste tablice znaczą „nie ustawiono". */
+  tydzien: TydzienPracy;
+  /** Dzisiejsza data według SERWERA — początek zakresu do rozłożenia celu. */
+  dzisiaj: string | null;
   onUstaw: (okres: 'MONTHLY' | 'WEEKLY', biezacaKwota: number | null) => void;
 }) {
   if (postep === null) {
@@ -81,6 +89,25 @@ export function KartaCelu({
    * tylko rozdzielczość tego, co i tak jest już policzone.
    */
   const godzinDziennie = iloraz(postep.estimatedHoursRemaining, postep.daysRemaining);
+
+  /**
+   * Rozłożenie celu na dni ROBOCZE, gdy tydzień pracy jest ustawiony.
+   *
+   * Koniec okresu wyprowadzam z `daysRemaining`, które przysyła serwer:
+   * `dzisiaj + (daysRemaining - 1)`. Dzięki temu nie powtarzam tutaj reguły
+   * „kiedy kończy się miesiąc / tydzień ISO" — biorę gotowy wynik serwera
+   * i tylko zamieniam go z powrotem na datę.
+   */
+  const plan =
+    czyUstawiony(tydzien) && dzisiaj !== null && !postep.isCompleted
+      ? rozlozCel(
+          tydzien,
+          postep.remainingNetto,
+          postep.estimatedHoursRemaining,
+          dzisiaj,
+          przesunDate(dzisiaj, Math.max(0, postep.daysRemaining - 1))
+        )
+      : null;
 
   return (
     <View style={s.karta}>
@@ -113,23 +140,71 @@ export function KartaCelu({
         <>
           <View style={s.kreska} />
           <Wiersz etykieta="Brakuje" wartosc={zl(postep.remainingNetto)} />
-          <Wiersz etykieta="Dziennie trzeba" wartosc={zl(postep.dailyRequiredNetto)} kolor={kolor} />
-          <Wiersz
-            etykieta="To około"
-            wartosc={
-              godzinDziennie === null ? '—' : `${godzinyLubMinuty(godzinDziennie)} dziennie`
-            }
-          />
-          {postep.estimatedHoursRemaining > 0 ? (
-            <Wiersz
-              etykieta="Do końca okresu"
-              wartosc={godzinyLubMinuty(postep.estimatedHoursRemaining)}
-            />
+
+          {plan !== null && plan.dniRobocze > 0 ? (
+            <>
+              <Wiersz
+                etykieta={`W dzień roboczy (zostało ${plan.dniRobocze})`}
+                wartosc={zl(plan.nettoNaDzienRoboczy)}
+                kolor={kolor}
+              />
+              <Wiersz
+                etykieta="To około"
+                wartosc={
+                  plan.godzinNaDzienRoboczy === null
+                    ? '—'
+                    : `${godzinyLubMinuty(plan.godzinNaDzienRoboczy)} w dzień roboczy`
+                }
+              />
+              <Wiersz
+                etykieta="Plan kontra potrzeba"
+                wartosc={`${godzinyLubMinuty(plan.godzinyPlanu)} / ${godzinyLubMinuty(plan.godzinyPotrzebne)}`}
+                kolor={
+                  plan.zapasGodzin !== null && plan.zapasGodzin < 0 ? C.blad : C.tekst
+                }
+              />
+            </>
+          ) : (
+            <>
+              <Wiersz
+                etykieta="Dziennie trzeba"
+                wartosc={zl(postep.dailyRequiredNetto)}
+                kolor={kolor}
+              />
+              <Wiersz
+                etykieta="To około"
+                wartosc={
+                  godzinDziennie === null ? '—' : `${godzinyLubMinuty(godzinDziennie)} dziennie`
+                }
+              />
+              {postep.estimatedHoursRemaining > 0 ? (
+                <Wiersz
+                  etykieta="Do końca okresu"
+                  wartosc={godzinyLubMinuty(postep.estimatedHoursRemaining)}
+                />
+              ) : null}
+            </>
+          )}
+          {plan !== null && plan.dniRobocze === 0 ? (
+            <Text style={s.uwaga}>
+              W Twoim tygodniu pracy nie ma już ani jednego dnia roboczego do końca tego okresu.
+              Liczby wyżej pokazują więc podział na wszystkie dni kalendarza.
+            </Text>
           ) : null}
+
+          {plan !== null && plan.zapasGodzin !== null && plan.zapasGodzin < 0 ? (
+            <Text style={s.uwaga}>
+              Twój plan to {godzinyLubMinuty(plan.godzinyPlanu)} do końca okresu, a przy obecnej
+              stawce cel wymaga {godzinyLubMinuty(plan.godzinyPotrzebne)}. Brakuje{' '}
+              {godzinyLubMinuty(-plan.zapasGodzin)} — trzeba dołożyć dzień albo podnieść stawkę.
+            </Text>
+          ) : null}
+
           <Text style={s.przypis}>
             {postep.usedFallbackRate
               ? `Przeliczone stawką domyślną ${zl(postep.avgHourlyRate)}/h — brak własnych godzin w tym okresie.`
               : `Przy Twojej stawce ${zl(postep.avgHourlyRate)}/h z tego okresu.`}
+            {plan !== null ? ` Rozłożone na dni robocze: ${opisDni(tydzien)}.` : ''}
           </Text>
         </>
       )}
@@ -346,6 +421,7 @@ const s = StyleSheet.create({
   etykieta: { color: C.tekstPrzygaszony, fontSize: 14, flexShrink: 1, paddingRight: 8 },
   wartosc: { color: C.tekst, fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
   przypis: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 10, lineHeight: 15 },
+  uwaga: { color: C.ostrzezenie, fontSize: 12, marginTop: 10, lineHeight: 17 },
 
   przyciskWtorny: {
     borderColor: C.akcent,
