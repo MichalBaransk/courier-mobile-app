@@ -1,0 +1,67 @@
+# Kontrola jakości przy każdym pushu — aplikacja mobilna.
+#
+# DLACZEGO TO ISTNIEJE.
+#
+# Aplikacja idzie do telefonu przez `eas update`, czyli OTA — bez budowania,
+# bez sprawdzania typów, bez uruchamiania testów. Zła linia wyjeżdża prosto
+# na urządzenie i objawia się dopiero jako biały ekran albo wywalona zakładka.
+#
+# Ten przebieg jest ostatnim miejscem, w którym da się to złapać. Komenda
+# jest ta sama, którą uruchamiasz u siebie (`npm run sprawdz` = `tsc --noEmit
+# && vitest run`) — CI ma sprawdzać dokładnie to, co Ty, inaczej zielony
+# wynik niczego nie dowodzi.
+#
+# CZEGO TEN PRZEBIEG NIE SPRAWDZA: nie buduje APK i nie uruchamia aplikacji.
+# Błąd konfiguracji natywnej (jak brak `scheme` dla expo-share-intent, który
+# wywalił build w kroku 17) tutaj NIE wyjdzie. Na to jest `npx expo config`
+# i sam build w EAS.
+
+name: sprawdz
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: sprawdz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sprawdz:
+    name: typy i testy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run sprawdz
+
+  # Osobne zadanie, bo pyta o sieć i bywa wolniejsze — a przede wszystkim
+  # dlatego, że jego porażka znaczy co innego niż porażka testów.
+  # `expo config` odczytuje `app.json` razem ze WSZYSTKIMI wtyczkami; to
+  # dokładnie ten krok, na którym padł build po dołożeniu expo-share-intent.
+  konfiguracja:
+    name: konfiguracja Expo
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: expo config
+        run: npx expo config --json > /dev/null && echo "KONFIGURACJA-OK"
