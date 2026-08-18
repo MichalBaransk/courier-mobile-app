@@ -605,12 +605,37 @@ function Aplikacja() {
    * Znacznik `ZMIANA` jest istotny: `deactivateKeepAwake` bez niego zdejmuje
    * blokadę załozoną przez KOGOKOLWIEK, więc dwa niezależne miejsca w kodzie
    * wyłączałyby się nawzajem. Dziś jesteśmy tu sami, ale to się zmienia cicho.
+   *
+   * ⚠️ WYŚCIG, KTÓRY TU BYŁ I ZOSTAŁ ZGŁOSZONY Z TERENU.
+   *
+   * Pierwsza wersja robiła `void activateKeepAwakeAsync(...)` i zwracała
+   * synchroniczne sprzątanie. Gdy zmiana kończyła się szybko — na przykład
+   * przez skasowanie godzin — kolejność wychodziła odwrotna do zamierzonej:
+   * najpierw WYŁĄCZ, potem (po rozwiązaniu obietnicy) WŁĄCZ. Blokada
+   * zostawała założona już po sprzątaniu i nie miał jej kto zdjąć — ekran
+   * nie gasł do restartu aplikacji.
+   *
+   * Poprawka: flaga `anulowane`. Jeśli sprzątanie zdążyło pierwsze, blokada
+   * jest zdejmowana natychmiast po tym, jak faktycznie powstanie.
    */
   useEffect(() => {
     if (!zmianaTrwa) return;
 
-    void activateKeepAwakeAsync('ZMIANA');
-    return () => deactivateKeepAwake('ZMIANA');
+    let anulowane = false;
+
+    void activateKeepAwakeAsync('ZMIANA').then(
+      () => {
+        if (anulowane) deactivateKeepAwake('ZMIANA');
+      },
+      () => {
+        /* Brak podtrzymania ekranu nie jest powodem do przerywania pracy. */
+      }
+    );
+
+    return () => {
+      anulowane = true;
+      deactivateKeepAwake('ZMIANA');
+    };
   }, [zmianaTrwa]);
 
   /**
