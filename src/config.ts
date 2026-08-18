@@ -28,3 +28,20 @@ export const REQUEST_TIMEOUT_MS = 10_000;
  * z `DodajWpis.tsx` — to jedyne dwa miejsca, które o niej wiedzą.
  */
 export const DATA_TESTOWA = '2000-01-01';
+
+/**
+ * Co ile ms ponawiać wysyłkę kolejki, gdy aplikacja jest otwarta.
+ *
+ * DLACZEGO TO ISTNIEJE: kolejka próbowała wysłać tylko przy starcie i przy
+ * powrocie z tła. Jeśli trzymasz aplikację otwartą, a sieć wróci — nikt nie
+ * ponawiał i wpis czekał do następnego przełączenia okna.
+ *
+ * DLACZEGO NIE `expo-network`: moduł ma otwarte zgłoszenia o niepoprawnym
+ * raportowaniu stanu po rozłączeniu i ponownym połączeniu. Fałszywe „jest
+ * sieć" biłoby w mur, fałszywe „nie ma" nie wysłałoby nic. Zwykły odstęp
+ * czasu nic nie zakłada i nie potrafi skłamać.
+ *
+ * 30 s to kompromis: wystarczająco rzadko, żeby nie zjadać baterii przy
+ * trwale zerwanym połączeniu, i wystarczająco często, żeby nie czekać.
+ */
+export const PONOWIENIE_KOLEJKI_MS = 30_000;

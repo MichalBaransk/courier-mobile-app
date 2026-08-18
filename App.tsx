@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -27,6 +27,8 @@ import {
   type UsunOdpowiedz,
   type ZapisOdpowiedz,
 } from './src/api';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { PONOWIENIE_KOLEJKI_MS } from './src/config';
 import { czyJestZgoda, sledzPozycje, zapytajOZgode } from './src/lokalizacja';
 import {
   dodaj as dodajDoKolejki,
@@ -581,6 +583,37 @@ function Aplikacja() {
   );
 
   /**
+   * „Trwa zmiana" — jeden warunek, dwa zastosowania.
+   *
+   * Wyjazd zapisany, zjazd jeszcze nie, i to na DZISIAJ. Przeglądanie wpisu
+   * sprzed tygodnia nie jest pracą i nie ma prawa włączać ani GPS-a, ani
+   * podtrzymywania ekranu.
+   */
+  const zmianaTrwa =
+    dzien !== null &&
+    dzien.date === dzisiaj &&
+    dzien.workFrom !== null &&
+    dzien.workTo === null;
+
+  /**
+   * Ekran nie gaśnie, dopóki trwa zmiana.
+   *
+   * Telefon w uchwycie na kierownicy, w rękawicach — wybudzanie go przy każdym
+   * spojrzeniu jest kosztem, którego nie widać w żadnym logu, a odczuwa się
+   * go co kurs.
+   *
+   * Znacznik `ZMIANA` jest istotny: `deactivateKeepAwake` bez niego zdejmuje
+   * blokadę załozoną przez KOGOKOLWIEK, więc dwa niezależne miejsca w kodzie
+   * wyłączałyby się nawzajem. Dziś jesteśmy tu sami, ale to się zmienia cicho.
+   */
+  useEffect(() => {
+    if (!zmianaTrwa) return;
+
+    void activateKeepAwakeAsync('ZMIANA');
+    return () => deactivateKeepAwake('ZMIANA');
+  }, [zmianaTrwa]);
+
+  /**
    * Pozycja kuriera — wysyłana, dopóki aplikacja jest na wierzchu i trwa zmiana.
    *
    * PO CO: bot liczy dojazd do restauracji od ostatniej znanej pozycji. Do tej
@@ -602,15 +635,7 @@ function Aplikacja() {
    * komunikaty, które naprawdę wymagają reakcji.
    */
   useEffect(() => {
-    if (stan !== 'gotowe' || !token) return;
-
-    const zmianaTrwa =
-      dzien !== null &&
-      dzien.date === dzisiaj &&
-      dzien.workFrom !== null &&
-      dzien.workTo === null;
-
-    if (!zmianaTrwa) return;
+    if (stan !== 'gotowe' || !token || !zmianaTrwa) return;
 
     let zatrzymane = false;
     let zatrzymaj: (() => void) | null = null;
@@ -635,7 +660,7 @@ function Aplikacja() {
       zatrzymane = true;
       zatrzymaj?.();
     };
-  }, [stan, token, dzisiaj, dzien]);
+  }, [stan, token, zmianaTrwa]);
 
   /**
    * Powrót z tła to najlepszy moment na ponowienie.
@@ -650,6 +675,37 @@ function Aplikacja() {
     });
     return () => sub.remove();
   }, [wyslijKolejke]);
+
+  /**
+   * Ponawianie kolejki przy OTWARTEJ aplikacji.
+   *
+   * Luka, którą to zamyka: dotychczas kolejka próbowała wysłać tylko przy
+   * starcie i przy powrocie z tła. Gdy trzymasz aplikację otwartą, a sieć
+   * wróci — nikt nie ponawiał i wpis czekał do następnego przełączenia okna.
+   *
+   * Celowo BEZ `expo-network`. Moduł ma otwarte zgłoszenia o niepoprawnym
+   * raportowaniu stanu po rozłączeniu i ponownym połączeniu; fałszywe
+   * „jest sieć" biłoby w mur, fałszywe „nie ma" nie wysłałoby nic. Odstęp
+   * czasu niczego nie zakłada i nie potrafi skłamać.
+   *
+   * Referencja zamiast zależności: `wyslijKolejke` zmienia tożsamość przy
+   * każdej zmianie kolejki, więc trzymanie jej w zależnościach kasowałoby
+   * i zakładało interwał w kółko.
+   */
+  const wyslijRef = useRef(wyslijKolejke);
+  useEffect(() => {
+    wyslijRef.current = wyslijKolejke;
+  }, [wyslijKolejke]);
+
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token || kolejka.length === 0) return;
+
+    const id = setInterval(() => {
+      void wyslijRef.current(true);
+    }, PONOWIENIE_KOLEJKI_MS);
+
+    return () => clearInterval(id);
+  }, [stan, token, kolejka.length]);
 
   /** Próba wysyłki przy starcie — gdy tylko wiadomo, że jest token i kolejka. */
   useEffect(() => {

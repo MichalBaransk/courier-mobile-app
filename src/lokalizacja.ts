@@ -24,6 +24,25 @@ import { czyWartoWyslac, zOdczytu, type OdczytPozycji } from './lokalizacjaOdczy
  * czy jest jeszcze coś warta — patrz budżet błędu w `lokalizacja.rules.ts`.
  */
 
+/**
+ * Dokładność żądana od systemu.
+ *
+ * ⚠️ TO NIE JEST DROBIAZG — pierwsza wersja miała tu `Balanced`, co na
+ * Androidzie znaczy pozycję z sieci komórkowej i Wi-Fi, o niepewności około
+ * 100 m. Pierwszy prawdziwy odczyt z telefonu potwierdził: `accuracy_m = 100`.
+ *
+ * Serwer liczy zaufanie w metrach: `niepewność + prędkość × wiek <= 300 m`.
+ * Przy niepewności 100 m jedna trzecia budżetu znika, zanim w ogóle ruszysz,
+ * a dopuszczalny wiek pozycji spada z 52 s do 36 s przy 20 km/h i z 10 s do
+ * 7 s przy 100 km/h. Cały mechanizm zbudowaliśmy wokół metrów, a potem
+ * karmiliśmy go najmniej dokładnym dostępnym źródłem.
+ *
+ * `High` to prawdziwy GPS, typowo 5–15 m na otwartym terenie. Cena: radio GPS
+ * pracuje ciągle, więc bateria schodzi szybciej. Jeśli to okaże się zbyt
+ * kosztowne, wróć tu i zmień na `Balanced` — to jedna linia i jedno OTA.
+ */
+const DOKLADNOSC = Location.Accuracy.High;
+
 /** Jak często prosimy system o odczyt. Serwer domyślnie wybacza 300 m błędu. */
 export const ODSTEP_MS = 20_000;
 
@@ -66,9 +85,7 @@ export async function czyJestZgoda(): Promise<boolean> {
  */
 export async function biezacaPozycja(): Promise<OdczytPozycji | null> {
   try {
-    const pozycja = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
+    const pozycja = await Location.getCurrentPositionAsync({ accuracy: DOKLADNOSC });
     return zOdczytu(pozycja, Date.now());
   } catch {
     return null;
@@ -92,7 +109,7 @@ export async function sledzPozycje(
 
   const sub = await Location.watchPositionAsync(
     {
-      accuracy: Location.Accuracy.Balanced,
+      accuracy: DOKLADNOSC,
       timeInterval: ODSTEP_MS,
       distanceInterval: ODSTEP_M,
     },
