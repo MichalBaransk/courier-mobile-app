@@ -18,7 +18,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.michalbaranski.courierapp"
+      "package": "com.michalbaranski.courierapp",
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -43,13 +44,23 @@
       ],
       "expo-notifications",
       [
+        "expo-audio",
+        {
+          "microphonePermission": "Mikrofon pozwala dyktować wpisy zamiast je wystukiwać — przydatne w rękawicach i w ruchu."
+        }
+      ],
+      [
         "expo-share-intent",
         {
           "androidIntentFilters": [
             "image/*"
           ]
         }
-      ]
+      ],
+      "expo-audio",
+      "expo-background-task",
+      "expo-sharing",
+      "expo-asset"
     ],
     "extra": {
       "eas": {
