@@ -1,4 +1,5 @@
 import { API_BASE, REQUEST_TIMEOUT_MS } from './config';
+import type { OdczytPozycji } from './lokalizacjaOdczyt';
 import type {
   ApiInfo,
   Cele,
@@ -185,6 +186,41 @@ async function zapisz(
  */
 export const postNapiwek = (token: string, kwota: number, data: string | null, klucz?: string) =>
   zapisz('/api/v1/napiwek', token, { kwota, data }, klucz);
+
+/**
+ * Pozycja kuriera. JEDYNY zapis, który nie zwraca stanu dnia.
+ *
+ * Powód po stronie serwera: pozycja nie jest wpisem do rozliczenia, tylko
+ * stanem chwilowym. Doklejanie podsumowania dnia do odpowiedzi oznaczałoby
+ * kilka zapytań do bazy co dwadzieścia sekund przez całą zmianę, bez żadnego
+ * pożytku.
+ *
+ * NIE trafia do kolejki offline i NIE dostaje `Idempotency-Key`. Pozycja
+ * sprzed dziesięciu minut jest bezwartościowa (patrz budżet błędu), więc
+ * odkładanie jej na później byłoby dostarczaniem śmieci. Brak sieci = odczyt
+ * przepada i tak ma być.
+ *
+ * Serwer oddaje SWÓJ budżet błędu, żeby aplikacja nie musiała go powtarzać
+ * u siebie — jedna zmiana w `.env` przestawia obie strony naraz.
+ */
+export interface LokalizacjaOdpowiedz {
+  zapisano: boolean;
+  maksBladM: number;
+  zaporaS: number;
+}
+
+export function postLokalizacja(
+  token: string,
+  odczyt: OdczytPozycji
+): Promise<LokalizacjaOdpowiedz> {
+  return request<LokalizacjaOdpowiedz>('/api/v1/lokalizacja', token, {
+    lat: odczyt.lat,
+    lon: odczyt.lon,
+    dokladnoscM: odczyt.dokladnoscM,
+    predkoscMps: odczyt.predkoscMps,
+    wiekMs: odczyt.wiekMs,
+  });
+}
 
 export const postPaliwo = (
   token: string,

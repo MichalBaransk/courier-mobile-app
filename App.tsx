@@ -22,10 +22,12 @@ import {
   getOkres,
   getSaldo,
   getToday,
+  postLokalizacja,
   wyslijZKolejki,
   type UsunOdpowiedz,
   type ZapisOdpowiedz,
 } from './src/api';
+import { czyJestZgoda, sledzPozycje, zapytajOZgode } from './src/lokalizacja';
 import {
   dodaj as dodajDoKolejki,
   nastepny,
@@ -577,6 +579,63 @@ function Aplikacja() {
     },
     [token, kolejka, miesiac, wybranyDzien, ustawKolejke, pobierzMiesiac, pobierzCele]
   );
+
+  /**
+   * Pozycja kuriera — wysyłana, dopóki aplikacja jest na wierzchu i trwa zmiana.
+   *
+   * PO CO: bot liczy dojazd do restauracji od ostatniej znanej pozycji. Do tej
+   * pory była nią ręcznie przypięta pinezka w Telegramie, często sprzed
+   * kilkunastu minut — i to jest jedna z dwóch przyczyn feralnej oceny oferty
+   * opisanej w §8f (7,56 km zamiast 3,37 km, 1,91 zł/km zamiast 2,81).
+   *
+   * WARUNEK „TRWA ZMIANA": `workFrom` ustawione, `workTo` puste, i to na
+   * DZISIAJ. Poza zmianą aplikacja nie dotyka GPS-a w ogóle — nie ma po co,
+   * a bateria jest u kuriera zasobem krytycznym.
+   *
+   * ⚠️ TYLKO NA PIERWSZYM PLANIE. Praca w tle wymaga `expo-task-manager`,
+   * którego w projekcie nie ma — to moduł natywny, więc nie wejdzie przez OTA.
+   * Szczegóły w komentarzu w `src/lokalizacja.ts`.
+   *
+   * Błędy wysyłki są POŁYKANE świadomie i jest to jedyne takie miejsce
+   * w aplikacji. Pozycja to dane odtwarzalne — za dwadzieścia sekund będzie
+   * następna. Pokazywanie „brak połączenia" co dwadzieścia sekund zasłoniłoby
+   * komunikaty, które naprawdę wymagają reakcji.
+   */
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token) return;
+
+    const zmianaTrwa =
+      dzien !== null &&
+      dzien.date === dzisiaj &&
+      dzien.workFrom !== null &&
+      dzien.workTo === null;
+
+    if (!zmianaTrwa) return;
+
+    let zatrzymane = false;
+    let zatrzymaj: (() => void) | null = null;
+
+    void (async () => {
+      if (!(await czyJestZgoda())) {
+        const zgoda = await zapytajOZgode();
+        if (zgoda !== 'przyznana') return;
+      }
+      if (zatrzymane) return;
+
+      zatrzymaj = await sledzPozycje((odczyt) => {
+        void postLokalizacja(token, odczyt).catch(() => {
+          /* patrz komentarz wyżej */
+        });
+      });
+
+      if (zatrzymane) zatrzymaj();
+    })();
+
+    return () => {
+      zatrzymane = true;
+      zatrzymaj?.();
+    };
+  }, [stan, token, dzisiaj, dzien]);
 
   /**
    * Powrót z tła to najlepszy moment na ponowienie.
