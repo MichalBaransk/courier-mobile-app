@@ -1,0 +1,56 @@
+// Środowisko pracy w przeglądarce (GitHub Codespaces) — aplikacja mobilna.
+//
+// PO CO TO JEST: patrz bliźniaczy plik w repozytorium bota. W skrócie —
+// pełne środowisko z Node 22 i terminalem, stawiane przez GitHuba na żądanie,
+// dostępne z dowolnego komputera.
+//
+// JAK URUCHOMIĆ: zielony przycisk Code → zakładka Codespaces →
+// Create codespace on main.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// UCZCIWE ZASTRZEŻENIE — CZEGO STĄD NIE ZROBISZ WYGODNIE
+//
+// `npx expo start` NIE ZOBACZY Twojego telefonu. Codespace stoi w chmurze
+// GitHuba, telefon w Twoim mieszkaniu; nie ma między nimi wspólnej sieci
+// lokalnej, więc zwykły tryb LAN odpada. Zostaje `npx expo start --tunnel`,
+// który przepycha ruch przez serwer pośredniczący — działa, ale wolniej
+// i kapryśniej niż to, co masz w WSL.
+//
+// Do czego Codespace nadaje się bez zastrzeżeń:
+//   • pisanie kodu, `npm run sprawdz`, przeglądanie repo,
+//   • `eas update` — wysyłka OTA nie potrzebuje telefonu w tej samej sieci,
+//   • `eas build` — build i tak dzieje się w chmurze Expo.
+//
+// Do klikania po aplikacji na żywo lepszy zostaje komputer w domu.
+// ─────────────────────────────────────────────────────────────────────────
+{
+  "name": "courier-app",
+
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+
+  // `eas-cli` globalnie, żeby `eas update` i `eas build` działały od razu.
+  //
+  // LOGOWANIE: nie przez `eas login` (za każdym razem od nowa), tylko przez
+  // sekret `EXPO_TOKEN`. Ustawia się go RAZ, w ustawieniach konta GitHub:
+  //   Settings → Codespaces → Secrets → New secret
+  //   nazwa: EXPO_TOKEN, wartość: token z expo.dev → Account → Access tokens
+  //   repository access: zaznacz to repozytorium
+  // Codespace wstrzyknie go jako zmienną środowiskową, a `eas` sam ją odczyta.
+  //
+  // Tokena NIE wpisujemy do tego pliku ani do żadnego innego w repo.
+  "postCreateCommand": "npm install && npm install -g eas-cli",
+
+  "postAttachCommand": "echo 'courier-app — sprawdzenie: npm run sprawdz | OTA: eas update'",
+
+  // Port Metro. Przydatny przy `expo start --web`; przy `--tunnel` zbędny,
+  // ale nie przeszkadza.
+  "forwardPorts": [8081],
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.cwd": "${containerWorkspaceFolder}"
+      }
+    }
+  }
+}
