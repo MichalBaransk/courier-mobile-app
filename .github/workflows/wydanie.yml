@@ -1,0 +1,106 @@
+# Wydanie aplikacji z GitHuba — bez Twojego komputera.
+#
+# PO CO TO JEST.
+#
+# Do tej pory `eas update` i `eas build` dało się odpalić tylko stamtąd, gdzie
+# masz Node, zalogowany `eas` i kopię repozytorium. Ten przebieg przenosi obie
+# czynności na GitHuba: klikasz przycisk w przeglądarce — także z telefonu —
+# i aktualizacja jedzie na Twoje urządzenie.
+#
+# DLACZEGO URUCHAMIANE RĘCZNIE, A NIE PRZY KAŻDYM PUSHU.
+#
+# Bo aplikacja jest narzędziem pracy, a nie zabawką. Automatyczne wydanie
+# przy każdym pushu na `main` znaczyłoby, że każda drobna zmiana natychmiast
+# ląduje na telefonie, którego używasz na zmianie. Testy tego nie zatrzymają —
+# przechodzą też zmiany przemyślane w połowie.
+#
+# Gdybyś kiedyś chciał wydawać automatycznie, wystarczy dopisać nad
+# `workflow_dispatch`:
+#     push:
+#       branches: [main]
+# i usunąć warunki `inputs.co ==` (albo ustawić domyślne zachowanie na `ota`).
+
+name: wydanie
+
+on:
+  workflow_dispatch:
+    inputs:
+      co:
+        description: 'Co wydać'
+        required: true
+        default: 'ota'
+        type: choice
+        options:
+          - ota
+          - apk
+      komunikat:
+        description: 'Krótki opis zmiany (widoczny w panelu Expo)'
+        required: false
+        default: ''
+
+# Dwa wydania naraz to przepis na wyścig o to, które wersja wygra na telefonie.
+concurrency:
+  group: wydanie
+  cancel-in-progress: false
+
+jobs:
+  wydanie:
+    name: ${{ inputs.co == 'apk' && 'build APK' || 'aktualizacja OTA' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # Tutaj CELOWO `npm ci`, a nie `npm install` jak w przebiegu bota.
+      #
+      # `eas update` pakuje bundle JavaScriptu z TEGO `node_modules` i wysyła go
+      # na telefon. To jedyne miejsce, gdzie wersje zależności trafiają wprost
+      # do użytkownika — więc ma być dokładnie to, co w locku, bez wariacji
+      # w ramach zakresów `^`.
+      #
+      # Gdyby `npm ci` tu padł tak jak w repozytorium bota (npm/cli#8805),
+      # NIE zamieniaj go na `npm install`. Napraw lockfile — szczegóły
+      # w `claude/ci-github-actions.md`.
+      - run: npm ci
+
+      # Brama. Nie wydajemy niczego, co nie przeszło typów i testów.
+      # To jest jedyny powód, dla którego to zadanie w ogóle instaluje pakiety.
+      - name: typy i testy
+        run: npm run sprawdz
+
+      - name: przygotuj eas-cli
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+
+      # OTA — sam JavaScript. Te same flagi co w `scripts/wdroz.sh`:
+      # `--environment` jest obowiązkowe, bo bez niego EAS pyta interaktywnie
+      # i przebieg staje w połowie bez żadnego komunikatu.
+      #
+      # `--branch preview` musi zgadzać się z kanałem, którym zbudowano APK
+      # (`eas.json` → build.preview.channel).
+      - name: eas update
+        if: inputs.co == 'ota'
+        run: |
+          OPIS="${{ inputs.komunikat }}"
+          [ -z "$OPIS" ] && OPIS="wydanie z GitHuba (${GITHUB_SHA:0:7})"
+          eas update --branch preview --environment preview --message "$OPIS"
+
+      # Build natywny. `--no-wait` kończy przebieg od razu po zakolejkowaniu —
+      # build i tak dzieje się w chmurze Expo i trwa kilkanaście minut, nie ma
+      # sensu palić na to minut GitHuba. Link do postępu jest w logu wyżej
+      # i w panelu expo.dev.
+      #
+      # PAMIĘTAJ o `android.versionCode` w `app.json`: przy
+      # `appVersionSource: local` EAS bierze go stamtąd i sam go NIE podniesie.
+      # Dwa APK z tym samym numerem potrafią dać `App not installed`.
+      - name: eas build
+        if: inputs.co == 'apk'
+        run: eas build --profile preview --platform android --non-interactive --no-wait
