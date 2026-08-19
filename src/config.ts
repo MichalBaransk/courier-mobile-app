@@ -32,8 +32,19 @@ export const REQUEST_TIMEOUT_MS = 10_000;
  * oferta zapisała się w bazie, a kurier widzi „serwer nie odpowiedział na czas"
  * i ocenia ją drugi raz — czyli płaci za drugie wywołanie modelu i dostaje
  * duplikat w statystykach.
+ *
+ * DLACZEGO 90 s, A NIE 45. Pierwsza wersja miała 45 s i to było za mało —
+ * policzone z konfiguracji bota, nie zgadnięte. `GEMINI_MAX_RETRIES` to 4,
+ * `GEMINI_BASE_DELAY_MS` to 2000, opóźnienie się podwaja: 2 + 4 + 8 + 16 = 30 s
+ * samego czekania między próbami, plus cztery wywołania modelu po kilka sekund.
+ * Jedno `429` z darmowego tieru i serwer pracuje 45–60 s, cały czas robiąc
+ * dokładnie to, o co go poproszono.
+ *
+ * 90 s zostawia zapas nad tym najgorszym przypadkiem. Kurier i tak nie patrzy
+ * na zegarek — patrzy, czy przyjąć kurs — a zerwanie połączenia w 45. sekundzie
+ * nie oszczędza mu ani sekundy oczekiwania po stronie serwera.
  */
-export const TIMEOUT_OCENY_MS = 45_000;
+export const TIMEOUT_OCENY_MS = 90_000;
 
 /**
  * Dzień-śmietnik do testów.

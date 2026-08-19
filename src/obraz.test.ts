@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { typObrazu } from './obraz';
+import { kluczObrazu, typObrazu } from './obraz';
 
 /**
  * Sygnatury liczone z prawdziwych bajtow, nie przepisane z pamieci:
@@ -27,5 +27,31 @@ describe('typObrazu — format z bajtów, nie z deklaracji pickera', () => {
   it('nieznany początek traktujemy jak JPEG — lepiej wysłać niż odmówić', () => {
     expect(typObrazu('AAAAAAAAAAAAAAAA')).toBe('image/jpeg');
     expect(typObrazu('')).toBe('image/jpeg');
+  });
+});
+
+describe('kluczObrazu — idempotencja oceny oferty', () => {
+  it('ten sam obraz daje ten sam klucz — na tym polega ponowienie', () => {
+    expect(kluczObrazu(JPEG)).toBe(kluczObrazu(JPEG));
+  });
+
+  it('różne obrazy dają różne klucze', () => {
+    expect(kluczObrazu(JPEG)).not.toBe(kluczObrazu(PNG));
+  });
+
+  it('mieści się w ograniczeniach serwera: 8–128 znaków z dozwolonego zbioru', () => {
+    for (const wejscie of [JPEG, PNG, 'A'.repeat(3_000_000), 'x']) {
+      const k = kluczObrazu(wejscie);
+      expect(k.length).toBeGreaterThanOrEqual(8);
+      expect(k.length).toBeLessThanOrEqual(128);
+      expect(/^[A-Za-z0-9._:-]+$/.test(k)).toBe(true);
+    }
+  });
+
+  it('zmiana JEDNEGO próbkowanego znaku zmienia klucz', () => {
+    const a = 'B'.repeat(100);
+    const b = `${'B'.repeat(70)}C${'B'.repeat(29)}`;
+    expect(a.length).toBe(b.length);
+    expect(kluczObrazu(a)).not.toBe(kluczObrazu(b));
   });
 });

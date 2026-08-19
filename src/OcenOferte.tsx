@@ -12,7 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { ApiError, postDecyzjaOferty, postOferte, type PozycjaOceny } from './api';
 import { km, stawka, zl } from './format';
-import { typObrazu } from './obraz';
+import { kluczObrazu, typObrazu } from './obraz';
 import { biezacaPozycja } from './lokalizacja';
 import { C } from './theme';
 import type { WynikOceny } from './types';
@@ -33,8 +33,28 @@ import type { WynikOceny } from './types';
  * między otwarciem a wyborem mija tyle czasu, ile trwa grzebanie w galerii.
  */
 
-/** Jakość kompresji zrzutu. */
-const JAKOSC = 0.7;
+/**
+ * Jakość obrazu wysyłanego do odczytu. BEZ stratnej kompresji.
+ *
+ * Pierwsza wersja miała 0.7 i to był błąd. Zrzut ekranu oferty to najgorszy
+ * możliwy materiał dla JPEG-a: ostre krawędzie drobnych cyfr na jednolitym
+ * tle. Kompresja rozmywa właśnie takie miejsca, a kilometry na ekranie Glovo
+ * (`3,37 km` wyrównane do prawej) są drobne i to one wypadają pierwsze.
+ *
+ * To NIE jest oszczędność, o którą warto walczyć. Zrzut przy jakości 1 to
+ * rząd 1–1,5 MB, po base64 ~2 MB — daleko od limitu 8 MB po stronie serwera.
+ * Nieodczytany kilometr kosztuje więcej: stawka liczy się wtedy z Google Maps
+ * albo wcale (§8f), czyli dokładnie ten przypadek, przez który bot kazał kiedyś
+ * odrzucać opłacalne kursy.
+ */
+const JAKOSC = 1;
+
+interface WybranyObraz {
+  base64: string;
+  typ: ReturnType<typeof typObrazu>;
+  /** Klucz idempotencji — ten sam przy każdym ponowieniu tego zrzutu. */
+  klucz: string;
+}
 
 type Stan =
   | { faza: 'wybor' }
@@ -55,11 +75,18 @@ export function OcenOferte({
 }) {
   const [stan, setStan] = useState<Stan>({ faza: 'wybor' });
   const [blad, setBlad] = useState<string | null>(null);
+  /**
+   * Ostatnio wybrany zrzut. Trzymamy go PO to, żeby ponowienie nie wymagało
+   * ponownego grzebania w galerii — a przy okazji, żeby poszło z tym samym
+   * kluczem idempotencji i nie kupiło drugiego odczytu.
+   */
+  const [obraz, setObraz] = useState<WybranyObraz | null>(null);
 
   const zamknij = () => {
     if (stan.faza === 'ocenianie') return;
     setStan({ faza: 'wybor' });
     setBlad(null);
+    setObraz(null);
     onZamknij();
   };
 
@@ -98,6 +125,18 @@ export function OcenOferte({
       return;
     }
 
+    const wybrany: WybranyObraz = {
+      base64: zdjecie.base64,
+      // Typ z BAJTÓW, nie z `asset.mimeType` — powód w nagłówku `obraz.ts`.
+      typ: typObrazu(zdjecie.base64),
+      klucz: kluczObrazu(zdjecie.base64),
+    };
+    setObraz(wybrany);
+    await wyslij(wybrany);
+  };
+
+  const wyslij = async (wybrany: WybranyObraz) => {
+    setBlad(null);
     setStan({ faza: 'ocenianie', krok: 'Pobieram pozycję…' });
 
     /**
@@ -121,16 +160,31 @@ export function OcenOferte({
     setStan({ faza: 'ocenianie', krok: 'Czytam ofertę…' });
 
     try {
-      // Typ z BAJTÓW, nie z `asset.mimeType` — powód w nagłówku `obraz.ts`.
-      const wynik = await postOferte(token, zdjecie.base64, typObrazu(zdjecie.base64), pozycja);
+      const wynik = await postOferte(token, wybrany.base64, wybrany.typ, pozycja, wybrany.klucz);
       setStan({ faza: 'wynik', wynik, decyzja: null });
       onOceniono();
     } catch (err) {
       setStan({ faza: 'wybor' });
+
+      /**
+       * Przekroczenie czasu NIE znaczy, że nic się nie stało.
+       *
+       * Serwer pracuje dalej — czyta zrzut i zapisuje ofertę — a zerwane
+       * połączenie widzi tylko telefon. Napisanie „nie udało się" byłoby
+       * nieprawdą i kazałoby ocenić ofertę drugi raz. Dlatego mówimy wprost,
+       * co mogło się stać, i przypominamy, że ponowienie jest darmowe:
+       * idzie z tym samym kluczem, więc serwer odda zapamiętaną odpowiedź
+       * zamiast pytać model ponownie.
+       */
+      const zaDlugo = err instanceof ApiError && err.message.includes('na czas');
       setBlad(
-        err instanceof ApiError
-          ? err.message
-          : 'Nie udało się ocenić oferty. Spróbuj jeszcze raz.'
+        zaDlugo
+          ? 'Serwer nie zdążył odpowiedzieć, ale prawdopodobnie DOKOŃCZYŁ ocenę — ' +
+              'sprawdź listę ofert niżej. Ponowienie tego samego zrzutu jest bezpieczne: ' +
+              'nie utworzy drugiego wpisu.'
+          : err instanceof ApiError
+            ? err.message
+            : 'Nie udało się ocenić oferty. Spróbuj jeszcze raz.'
       );
     }
   };
@@ -171,6 +225,12 @@ export function OcenOferte({
               <Pressable style={s.przycisk} onPress={() => void ocen(true)}>
                 <Text style={s.przyciskTekst}>📷  Zrób zdjęcie ekranu</Text>
               </Pressable>
+
+              {obraz !== null ? (
+                <Pressable style={s.przycisk} onPress={() => void wyslij(obraz)}>
+                  <Text style={s.przyciskTekst}>🔁  Ponów ostatni zrzut</Text>
+                </Pressable>
+              ) : null}
 
               <Text style={s.przypis}>
                 Pozycję GPS pobieram dopiero po wybraniu zdjęcia, żeby była z tej chwili, a nie
