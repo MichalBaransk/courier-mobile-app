@@ -62,6 +62,41 @@ export interface DailySummary {
   distanceKm: number | null;
 }
 
+/**
+ * Werdykt oceny oferty z `POST /api/v1/oferta`.
+ *
+ * To NIE jest `CourseOfferItem` z listy — tamten opisuje ofertę zapisaną
+ * w bazie, ten niesie dodatkowo powody, dla których Google Maps czegoś nie
+ * policzyło. Te powody mają sens tylko zaraz po ocenie: „oferta nie podaje
+ * adresu klienta" trzeba pokazać kurierowi TERAZ, żeby wiedział, dlaczego
+ * kontrola dojazdu jest pusta, a nie zgadywał, że coś się zepsuło.
+ */
+export interface WynikOceny {
+  offerId: number;
+  isProfitable: boolean;
+  grossAmount: number;
+  netAmount: number;
+  pickupAddress: string;
+  deliveryAddress: string;
+  appPickupKm: number | null;
+  appDeliveryKm: number | null;
+  appTotalKm: number | null;
+  mapsPickupKm: number | null;
+  mapsDeliveryKm: number | null;
+  mapsTotalKm: number | null;
+  /** Czemu Maps nie policzyło dojazdu. `null` = policzyło. */
+  mapsReason: string | null;
+  /** Czemu Maps nie policzyło odcinka do klienta. */
+  mapsDeliveryReason: string | null;
+  /** Wiek pozycji użytej do kontroli, w pełnych minutach. */
+  mapsAgeMin: number;
+  /** Dystans użyty do stawki. */
+  totalKm: number;
+  rateBasis: 'APP' | 'MAPS' | 'NONE';
+  netRatePerKm: number;
+  status: 'PENDING';
+}
+
 /** Lekki wiersz dzienny z `/api/v1/dni` — pod wykres i kalendarz. */
 export interface DailyTotals {
   date: string;

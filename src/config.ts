@@ -19,6 +19,23 @@ export const TOKEN_KEY = 'glovo_api_token';
 export const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
+ * Osobny, DŁUŻSZY timeout dla oceny oferty.
+ *
+ * Zwykłe zapisy to jeden `INSERT` i wracają w ułamku sekundy — 10 s jest tam
+ * z ogromnym zapasem. Ocena oferty idzie inną drogą: obraz leci na serwer,
+ * czeka w kolejce zapytań do Gemini (§11: jedno naraz, 1,2 s odstępu, do
+ * czterech ponowień), model czyta zrzut, a potem jeszcze Google Maps liczy
+ * dojazd. Przy zajętej kolejce i jednym ponowieniu spokojnie robi się z tego
+ * kilkanaście sekund.
+ *
+ * Zbyt krótki timeout jest tu GORSZY niż długie czekanie: żądanie i tak doszło,
+ * oferta zapisała się w bazie, a kurier widzi „serwer nie odpowiedział na czas"
+ * i ocenia ją drugi raz — czyli płaci za drugie wywołanie modelu i dostaje
+ * duplikat w statystykach.
+ */
+export const TIMEOUT_OCENY_MS = 45_000;
+
+/**
  * Dzień-śmietnik do testów.
  *
  * Wpisy z tą datą nie mieszają się z żadnym prawdziwym dniem pracy, więc da się

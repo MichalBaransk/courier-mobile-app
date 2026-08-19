@@ -1,4 +1,4 @@
-import { API_BASE, REQUEST_TIMEOUT_MS } from './config';
+import { API_BASE, REQUEST_TIMEOUT_MS, TIMEOUT_OCENY_MS } from './config';
 import type { OdczytPozycji } from './lokalizacjaOdczyt';
 import type {
   ApiInfo,
@@ -9,6 +9,7 @@ import type {
   PeriodSummary,
   Saldo,
   TargetProgress,
+  WynikOceny,
 } from './types';
 
 /**
@@ -44,20 +45,22 @@ async function request<T>(
   path: string,
   token: string,
   cialo?: unknown,
-  klucz?: string
+  klucz?: string,
+  timeoutMs?: number
 ): Promise<T> {
   const cialoJson = cialo === undefined ? undefined : JSON.stringify(cialo);
-  return zadanie<T>(path, token, cialoJson, klucz);
+  return zadanie<T>(path, token, cialoJson, klucz, timeoutMs);
 }
 
 async function zadanie<T>(
   path: string,
   token: string,
   cialoJson: string | undefined,
-  klucz: string | undefined
+  klucz: string | undefined,
+  timeoutMs: number = REQUEST_TIMEOUT_MS
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   const naglowki: Record<string, string> = { Authorization: `Bearer ${token}` };
   if (cialoJson !== undefined) naglowki['content-type'] = 'application/json';
@@ -346,6 +349,55 @@ export async function postUsun(
 /** Kasowanie JEDNEJ wskazanej zmiany. Cukier na `postUsun` — czytelniej w miejscu wywołania. */
 export const usunSesje = (token: string, sesjaId: number, data: string | null) =>
   postUsun(token, 'SHIFT', data, sesjaId);
+
+/* ========================================================================== */
+/*  Ocena oferty                                                              */
+/* ========================================================================== */
+
+/** Pozycja w chwili oceny — z `biezacaPozycja()`, nie z zapisanej historii. */
+export interface PozycjaOceny {
+  lat: number;
+  lon: number;
+  /** Ile ms upłynęło od złapania pozycji. Wiek, nie znacznik czasu. */
+  wiekMs?: number | null;
+}
+
+/**
+ * Ocena oferty ze zrzutu ekranu — to samo, co zdjęcie wysłane do bota.
+ *
+ * `pozycja` jest opcjonalna po stronie serwera, ale to ONA jest powodem,
+ * dla którego robimy to w aplikacji. Telefon czyta GPS w chwili oceny, więc
+ * pozycja ma wiek 1–3 s zamiast kilkunastu minut — a od tego zależy, czy
+ * kontrola dojazdu przez Google Maps cokolwiek znaczy.
+ *
+ * NIE trafia do kolejki offline. Powód jest ten sam co przy kasowaniu:
+ * oferta wysłana cztery godziny później dotyczy kursu, który dawno przepadł,
+ * a pozycja z tamtej chwili opisuje zupełnie inne miejsce.
+ */
+export function postOferte(
+  token: string,
+  obrazBase64: string,
+  typ: 'image/jpeg' | 'image/png',
+  pozycja: PozycjaOceny | null,
+  klucz?: string
+): Promise<WynikOceny> {
+  return request<WynikOceny>(
+    '/api/v1/oferta',
+    token,
+    { obraz: obrazBase64, typ, pozycja },
+    klucz,
+    TIMEOUT_OCENY_MS
+  );
+}
+
+/** Decyzja o ofercie — odpowiednik przycisków pod kartą w Telegramie. */
+export function postDecyzjaOferty(
+  token: string,
+  id: number,
+  decyzja: 'ACCEPTED' | 'REJECTED'
+): Promise<{ id: number; status: string }> {
+  return request<{ id: number; status: string }>('/api/v1/oferta/decyzja', token, { id, decyzja });
+}
 
 /* ========================================================================== */
 /*  Cele i oferty                                                             */

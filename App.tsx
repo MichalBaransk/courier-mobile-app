@@ -56,6 +56,7 @@ import {
   zakresMiesiaca,
 } from './src/okresy';
 import { DodajWpis } from './src/DodajWpis';
+import { OcenOferte } from './src/OcenOferte';
 import { EkranTokena } from './src/EkranTokena';
 import { KartaDnia, KartaOkresu, KartaSalda, SzczegolyTygodnia } from './src/Karty';
 import { KartaCelu, UstawCel } from './src/Cele';
@@ -212,6 +213,7 @@ function Aplikacja() {
   const [odswiezam, setOdswiezam] = useState(false);
   const [dodawanie, setDodawanie] = useState(false);
   const [kasowanie, setKasowanie] = useState(false);
+  const [ocenianieOferty, setOcenianieOferty] = useState(false);
   const [potwierdzenie, setPotwierdzenie] = useState<string | null>(null);
   /**
    * Która sekcja jest na wierzchu.
@@ -1169,6 +1171,14 @@ function Aplikacja() {
               </Text>
             </Pressable>
 
+            {/* Ocena oferty NA MIEJSCU, bez przechodzenia do Telegrama.
+                Przycisk stoi nad listą, bo to czynność robiona w ruchu, przy
+                ofercie, która za chwilę zniknie — a lista jest do oglądania
+                później. */}
+            <Pressable style={s.ocenPrzycisk} onPress={() => setOcenianieOferty(true)}>
+              <Text style={s.ocenPrzyciskTekst}>🛵  Oceń ofertę ze zrzutu</Text>
+            </Pressable>
+
             <KartaOfert
               oferty={ofertyWidoku}
               etykieta={etykietaOfert}
@@ -1320,6 +1330,17 @@ function Aplikacja() {
             onZamknij={() => setKasowanie(false)}
             onUsunieto={(wynik: UsunOdpowiedz) => {
               poZmianie(wynik.dzien, null);
+            }}
+          />
+
+          <OcenOferte
+            widoczny={ocenianieOferty}
+            token={token}
+            onZamknij={() => setOcenianieOferty(false)}
+            onOceniono={() => {
+              // Oferta wpada do bazy z datą serwera, więc odświeżamy miesiąc —
+              // to jedno wywołanie, które i tak niesie listę ofert.
+              if (miesiac !== null) void pobierzMiesiac(token, miesiac);
             }}
           />
 
@@ -1487,6 +1508,16 @@ const s = StyleSheet.create({
   filtrLink: { color: C.akcent, fontSize: 13, fontWeight: '600' },
 
   podpowiedz: { color: C.tekstPrzygaszony, fontSize: 11, lineHeight: 16, paddingHorizontal: 4 },
+
+  // Cel dotykowy z zapasem — to przycisk używany w rękawicy, na postoju,
+  // przy ofercie liczonej w sekundach.
+  ocenPrzycisk: {
+    backgroundColor: C.akcent,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  ocenPrzyciskTekst: { color: C.tlo, fontSize: 15, fontWeight: '800' },
 
   kartaTygodnia: {
     backgroundColor: C.karta,
