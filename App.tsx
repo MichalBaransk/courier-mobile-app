@@ -66,6 +66,9 @@ import { KartaAnalizyDnia, PorownanieOkresow } from './src/Analiza';
 import { UsunWpisy } from './src/UsunWpisy';
 import { WybierzDate } from './src/WybierzDate';
 import { PasekSekcji, type Sekcja } from './src/Nawigacja';
+import { PanelUstawien } from './src/Ustawienia';
+import { DOMYSLNE as USTAWIENIA_DOMYSLNE, type Ustawienia } from './src/ustawienia';
+import { wczytajUstawienia, zapiszUstawienia } from './src/ustawieniaMagazyn';
 import { KalendarzMiesiaca } from './src/Wykresy';
 import { C } from './src/theme';
 import type {
@@ -258,6 +261,8 @@ function Aplikacja() {
   const [kalendarzOfert, setKalendarzOfert] = useState(false);
   /** Tydzień pracy — ustawienie lokalne, wpływa tylko na rozłożenie celu. */
   const [tydzien, setTydzien] = useState<TydzienPracy>(PUSTY_TYDZIEN);
+  const [ustawienia, setUstawienia] = useState<Ustawienia>(USTAWIENIA_DOMYSLNE);
+  const [panelUstawien, setPanelUstawien] = useState(false);
   const [edytorTygodnia, setEdytorTygodnia] = useState(false);
   const [kwotaCelu, setKwotaCelu] = useState<number | null>(null);
 
@@ -305,6 +310,35 @@ function Aplikacja() {
     void (async () => {
       setTydzien(await wczytajTydzien());
     })();
+  }, []);
+
+  /**
+   * Ustawienia wczytujemy raz, przy starcie.
+   *
+   * Do czasu wczytania obowiązują domyślne, czyli dotychczasowe zachowanie.
+   * Migotnięcie „ekran gaśnie / nie gaśnie" przez ułamek sekundy jest
+   * niewidoczne, a alternatywa — wstrzymanie renderowania aplikacji do czasu
+   * odczytu preferencji — byłaby wymianą czegoś niewidocznego na coś widocznego.
+   */
+  useEffect(() => {
+    void (async () => {
+      setUstawienia(await wczytajUstawienia());
+    })();
+  }, []);
+
+  /**
+   * Zmiana ustawienia działa NATYCHMIAST, zapis leci w tle.
+   *
+   * Odwrotna kolejność (najpierw dysk, potem stan) dałaby przełącznik, który
+   * zwleka. Nieudany zapis oznacza tylko tyle, że po restarcie wróci poprzednia
+   * wartość — i nie ma o czym alarmować w trakcie zmiany.
+   */
+  const zmienUstawienia = useCallback((zmiana: Partial<Ustawienia>) => {
+    setUstawienia((poprzednie) => {
+      const nowe = { ...poprzednie, ...zmiana };
+      void zapiszUstawienia(nowe);
+      return nowe;
+    });
   }, []);
 
   const obsluzBlad = useCallback(async (err: unknown) => {
@@ -619,7 +653,7 @@ function Aplikacja() {
    * jest zdejmowana natychmiast po tym, jak faktycznie powstanie.
    */
   useEffect(() => {
-    if (!zmianaTrwa) return;
+    if (!zmianaTrwa || !ustawienia.ekranNieGasnie) return;
 
     let anulowane = false;
 
@@ -636,7 +670,7 @@ function Aplikacja() {
       anulowane = true;
       deactivateKeepAwake('ZMIANA');
     };
-  }, [zmianaTrwa]);
+  }, [zmianaTrwa, ustawienia.ekranNieGasnie]);
 
   /**
    * Pozycja kuriera — wysyłana, dopóki aplikacja jest na wierzchu i trwa zmiana.
@@ -660,7 +694,7 @@ function Aplikacja() {
    * komunikaty, które naprawdę wymagają reakcji.
    */
   useEffect(() => {
-    if (stan !== 'gotowe' || !token || !zmianaTrwa) return;
+    if (stan !== 'gotowe' || !token || !zmianaTrwa || !ustawienia.wysylajPozycje) return;
 
     let zatrzymane = false;
     let zatrzymaj: (() => void) | null = null;
@@ -676,7 +710,7 @@ function Aplikacja() {
         void postLokalizacja(token, odczyt).catch(() => {
           /* patrz komentarz wyżej */
         });
-      });
+      }, ustawienia.wysokaDokladnosc);
 
       if (zatrzymane) zatrzymaj();
     })();
@@ -685,7 +719,7 @@ function Aplikacja() {
       zatrzymane = true;
       zatrzymaj?.();
     };
-  }, [stan, token, zmianaTrwa]);
+  }, [stan, token, zmianaTrwa, ustawienia.wysylajPozycje, ustawienia.wysokaDokladnosc]);
 
   /**
    * Powrót z tła to najlepszy moment na ponowienie.
@@ -1147,6 +1181,17 @@ function Aplikacja() {
           setPotwierdzenie(null);
           setSekcja(nowa);
         }}
+        onWiecej={() => {
+          setPotwierdzenie(null);
+          setPanelUstawien(true);
+        }}
+      />
+
+      <PanelUstawien
+        widoczny={panelUstawien}
+        ustawienia={ustawienia}
+        onZmien={zmienUstawienia}
+        onZamknij={() => setPanelUstawien(false)}
       />
 
       {token ? (

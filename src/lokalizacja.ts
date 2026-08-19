@@ -38,10 +38,14 @@ import { czyWartoWyslac, zOdczytu, type OdczytPozycji } from './lokalizacjaOdczy
  * karmiliśmy go najmniej dokładnym dostępnym źródłem.
  *
  * `High` to prawdziwy GPS, typowo 5–15 m na otwartym terenie. Cena: radio GPS
- * pracuje ciągle, więc bateria schodzi szybciej. Jeśli to okaże się zbyt
- * kosztowne, wróć tu i zmień na `Balanced` — to jedna linia i jedno OTA.
+ * pracuje ciągle, więc bateria schodzi szybciej.
+ *
+ * Od kroku 28 wybór należy do użytkownika (Więcej → Wysoka dokładność GPS),
+ * bo tylko on może zmierzyć, czy bateria wyrabia. Domyślnie `High`.
  */
-const DOKLADNOSC = Location.Accuracy.High;
+function dokladnosc(wysoka: boolean) {
+  return wysoka ? Location.Accuracy.High : Location.Accuracy.Balanced;
+}
 
 /** Jak często prosimy system o odczyt. Serwer domyślnie wybacza 300 m błędu. */
 export const ODSTEP_MS = 20_000;
@@ -83,9 +87,11 @@ export async function czyJestZgoda(): Promise<boolean> {
  * To jest docelowa droga przy ocenie oferty: pozycja złapana W MOMENCIE,
  * w którym jest potrzebna, ma wiek 1–3 s i żadna prędkość jej nie psuje.
  */
-export async function biezacaPozycja(): Promise<OdczytPozycji | null> {
+export async function biezacaPozycja(wysokaDokladnosc = true): Promise<OdczytPozycji | null> {
   try {
-    const pozycja = await Location.getCurrentPositionAsync({ accuracy: DOKLADNOSC });
+    const pozycja = await Location.getCurrentPositionAsync({
+      accuracy: dokladnosc(wysokaDokladnosc),
+    });
     return zOdczytu(pozycja, Date.now());
   } catch {
     return null;
@@ -103,13 +109,14 @@ export async function biezacaPozycja(): Promise<OdczytPozycji | null> {
  * niż prosiliśmy, a każdy wysłany to żądanie po komórkowym internecie.
  */
 export async function sledzPozycje(
-  przy: (odczyt: OdczytPozycji) => void
+  przy: (odczyt: OdczytPozycji) => void,
+  wysokaDokladnosc = true
 ): Promise<() => void> {
   let ostatniaWyslanaMs: number | null = null;
 
   const sub = await Location.watchPositionAsync(
     {
-      accuracy: DOKLADNOSC,
+      accuracy: dokladnosc(wysokaDokladnosc),
       timeInterval: ODSTEP_MS,
       distanceInterval: ODSTEP_M,
     },

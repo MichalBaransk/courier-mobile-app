@@ -25,12 +25,25 @@ const SEKCJE: Array<{ id: Sekcja; ikona: string; podpis: string }> = [
   { id: 'portfel', ikona: '💰', podpis: 'Portfel' },
 ];
 
+/**
+ * Piąta pozycja — „Więcej".
+ *
+ * CELOWO NIE JEST SEKCJĄ. Nie przełącza `aktywna`, tylko otwiera panel
+ * ustawień. Dzięki temu maszyna stanu sekcji zostaje czterostanowa i nie
+ * trzeba dla „Więcej" wymyślać nagłówka ani treści ekranu.
+ *
+ * Dlaczego tutaj, a nie jako hamburger w prawym górnym rogu: ten róg jest
+ * najtrudniej osiągalnym punktem ekranu przy obsłudze jedną ręką, a telefon
+ * bywa w uchwycie i w rękawicy. Dolny pasek jest w zasięgu kciuka z definicji.
+ */
 export function PasekSekcji({
   aktywna,
   onZmien,
+  onWiecej,
 }: {
   aktywna: Sekcja;
   onZmien: (sekcja: Sekcja) => void;
+  onWiecej: () => void;
 }) {
   /**
    * PRAWDZIWY margines bezpieczny, nie przybliżenie.
@@ -67,6 +80,22 @@ export function PasekSekcji({
           </Pressable>
         );
       })}
+
+      <Pressable
+        style={s.przycisk}
+        onPress={onWiecej}
+        accessibilityRole="button"
+        accessibilityLabel="Więcej i ustawienia"
+      >
+        <Text style={[s.ikona, s.przygaszona]}>⚙️</Text>
+        <Text style={s.podpis} numberOfLines={1}>
+          Więcej
+        </Text>
+        {/* Kreska bez wypełnienia — „Więcej" nigdy nie jest sekcją aktywną,
+            ale musi zajmować tyle samo miejsca co reszta, inaczej ikony
+            przestają stać w jednej linii. */}
+        <View style={s.kreska} />
+      </Pressable>
     </View>
   );
 }
@@ -80,11 +109,11 @@ const s = StyleSheet.create({
     paddingTop: 8,
   },
   przycisk: { flex: 1, alignItems: 'center', paddingVertical: 2, paddingHorizontal: 2 },
-  // Cztery zakładki zamiast trzech — ikona i podpis odrobinę mniejsze,
-  // żeby „Kalendarz" nie musiał się łamać ani skracać wielokropkiem.
-  ikona: { fontSize: 20, lineHeight: 24 },
+  // Pięć zakładek — ikona i podpis odrobinę mniejsze, żeby „Kalendarz"
+  // nie musiał się łamać ani skracać wielokropkiem.
+  ikona: { fontSize: 19, lineHeight: 23 },
   przygaszona: { opacity: 0.45 },
-  podpis: { color: C.tekstPrzygaszony, fontSize: 10, marginTop: 2 },
+  podpis: { color: C.tekstPrzygaszony, fontSize: 9.5, marginTop: 2 },
   podpisAktywny: { color: C.akcent, fontWeight: '700' },
   kreska: {
     height: 2,
