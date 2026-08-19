@@ -8,6 +8,7 @@ import {
   krotkaData,
   litry,
   normalizujGodzine,
+  numerZmiany,
   poprawnaData,
   przesunDate,
   stawka,
@@ -211,5 +212,45 @@ describe('daty po polsku', () => {
   it('niepoprawne wejście wraca bez zmian, zamiast wywalać renderowanie', () => {
     expect(dataPoPolsku('bzdura')).toBe('bzdura');
     expect(krotkaData('bzdura')).toBe('bzdura');
+  });
+});
+
+describe('numerZmiany — liczebnik porządkowy rodzaju żeńskiego', () => {
+  it('jednocyfrowe', () => {
+    expect(numerZmiany(1)).toBe('1-sza');
+    expect(numerZmiany(2)).toBe('2-ga');
+    expect(numerZmiany(3)).toBe('3-cia');
+    expect(numerZmiany(7)).toBe('7-ma');
+    expect(numerZmiany(8)).toBe('8-ma');
+  });
+
+  it('pozostałe jednocyfrowe biorą -ta', () => {
+    expect(numerZmiany(4)).toBe('4-ta');
+    expect(numerZmiany(5)).toBe('5-ta');
+    expect(numerZmiany(6)).toBe('6-ta');
+    expect(numerZmiany(9)).toBe('9-ta');
+    expect(numerZmiany(10)).toBe('10-ta');
+  });
+
+  it('nastki NIE dziedziczą końcówki po ostatniej cyfrze', () => {
+    // „siedemnasta", nie „siedemnasta siódma" — stąd -ta, choć kończy się na 7.
+    expect(numerZmiany(17)).toBe('17-ta');
+    expect(numerZmiany(18)).toBe('18-ta');
+    expect(numerZmiany(11)).toBe('11-ta');
+  });
+
+  it('powyżej nastek decyduje OSTATNIA CYFRA, nie sama liczba', () => {
+    // „dwudziesta pierwsza", nie „dwudziesta ta" — najłatwiejszy błąd w tej regule.
+    expect(numerZmiany(21)).toBe('21-sza');
+    expect(numerZmiany(22)).toBe('22-ga');
+    expect(numerZmiany(23)).toBe('23-cia');
+    expect(numerZmiany(27)).toBe('27-ma');
+    expect(numerZmiany(24)).toBe('24-ta');
+  });
+
+  it('bzdurne wejście nie wywala się, tylko oddaje coś czytelnego', () => {
+    expect(numerZmiany(0)).toBe('0-ta');
+    expect(numerZmiany(-1)).toBe('-1-ta');
+    expect(numerZmiany(NaN)).toBe('NaN-ta');
   });
 });

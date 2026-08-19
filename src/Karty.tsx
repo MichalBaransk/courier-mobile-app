@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { dataPoPolsku, godziny, km, litry, zl, zlZeZnakiem } from './format';
+import { dataPoPolsku, godziny, km, litry, numerZmiany, zl, zlZeZnakiem } from './format';
 import { iloraz } from './licz';
 import { C } from './theme';
 import type { DailySummary, DailyTotals, PeriodSummary, Saldo, Sesja } from './types';
@@ -90,7 +90,7 @@ export function KartaDnia({ dane }: { dane: DailySummary }) {
           dane.sesje.map((sz, idx) => (
             <Wiersz
               key={sz.id}
-              etykieta={dane.sesje.length > 1 ? `${idx + 1}. Godziny` : 'Godziny'}
+              etykieta={dane.sesje.length > 1 ? `${numerZmiany(idx + 1)} zmiana` : 'Godziny'}
               wartosc={
                 sz.do === null
                   ? `${sz.od} – trwa`

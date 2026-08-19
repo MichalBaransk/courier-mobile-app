@@ -146,6 +146,52 @@ export function poprawnaData(iso: string): boolean {
  * więc skróty rozwijamy TUTAJ. Kurier wpisujący „9" ma na myśli dziewiątą rano,
  * a nie błąd walidacji.
  */
+/**
+ * Liczebnik porządkowy rodzaju żeńskiego w skrócie: `1` → `1-sza`.
+ *
+ * Rodzaj żeński, bo jedyne, co tym numerujemy, to ZMIANA.
+ *
+ * Końcówkę narzuca OSTATNIA CYFRA, a nie sama liczba — `21` to „dwudziesta
+ * pierwsza", czyli `21-sza`, a nie `21-ta`:
+ *
+ * | ostatnia cyfra | forma      | skrót    |
+ * |----------------|------------|----------|
+ * | 1              | pierwsza   | `1-sza`  |
+ * | 2              | druga      | `2-ga`   |
+ * | 3              | trzecia    | `3-cia`  |
+ * | 7, 8           | siódma, ósma | `7-ma` |
+ * | reszta         | …ta        | `n-ta`   |
+ *
+ * Wyjątkiem są NASTKI: `11`–`19` to „jedenasta … dziewiętnasta", więc mimo
+ * końcówki `1`, `2`, `3`, `7` czy `8` biorą `-ta`. `17` to `17-ta`, choć `27`
+ * („dwudziesta siódma") to już `27-ma`.
+ *
+ * Kilkanaście zmian w dobie to i tak fikcja — limit 16 h przy minimum 15 minut.
+ * Ale pełna reguła nie kosztuje więcej niż wyliczanie wyjątków do dziesięciu
+ * i nie trzeba pamiętać, gdzie się urywa.
+ */
+export function numerZmiany(n: number): string {
+  if (!Number.isFinite(n) || n < 1) return `${n}-ta`;
+
+  const calk = Math.floor(n);
+  const nastka = calk % 100 >= 11 && calk % 100 <= 19;
+  if (nastka) return `${calk}-ta`;
+
+  switch (calk % 10) {
+    case 1:
+      return `${calk}-sza`;
+    case 2:
+      return `${calk}-ga`;
+    case 3:
+      return `${calk}-cia`;
+    case 7:
+    case 8:
+      return `${calk}-ma`;
+    default:
+      return `${calk}-ta`;
+  }
+}
+
 export function normalizujGodzine(tekst: string): string | null {
   const t = tekst.trim().replace('.', ':').replace(',', ':');
   if (t.length === 0) return null;

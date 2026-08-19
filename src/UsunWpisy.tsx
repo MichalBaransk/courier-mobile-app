@@ -11,7 +11,7 @@ import {
 
 import { ApiError, postUsun, type UsunOdpowiedz, type ZakresUsuniecia } from './api';
 import { toBrakSieci } from './kolejka';
-import { godziny, km, zl } from './format';
+import { godziny, km, numerZmiany, zl } from './format';
 import { C } from './theme';
 import type { DailySummary } from './types';
 
@@ -158,7 +158,7 @@ export function UsunWpisy({
       klucz: `SHIFT:${sz.id}`,
       cel: 'SHIFT' as const,
       sesjaId: sz.id,
-      etykieta: `Zmiana ${idx + 1}`,
+      etykieta: `${numerZmiany(idx + 1)} zmiana`,
       opis: 'Kasuje tę jedną zmianę. Pozostałe zostają.',
       teraz: () => `${sz.od} – ${sz.do ?? 'trwa'}`,
     })),
