@@ -28,6 +28,7 @@ import { ocenLiczbe, ocenParagon, ocenZmiane, polacz, type Ocena } from './limit
 import { nowyKlucz, toBrakSieci, type EndpointKolejki } from './kolejka';
 import { WybierzDate } from './WybierzDate';
 import { WybierzGodzine } from './WybierzGodzine';
+import type { DailySummary } from './types';
 import { C } from './theme';
 
 /**
@@ -95,6 +96,18 @@ interface Props {
    * droga do wpisu w złym dniu.
    */
   domyslnaData: string | null;
+  /**
+   * Wczytany dzień — POTRZEBNY tylko do oceny zmiany.
+   *
+   * Doba może mieć wiele zmian, więc formularz musi wiedzieć, co już w niej
+   * jest: inaczej przepuściłby godziny nachodzące na istniejącą zmianę albo
+   * sumę powyżej 16 h i dowiedziałbyś się o tym dopiero z odpowiedzi serwera.
+   *
+   * `null` (albo inna data niż wybrana) znaczy „nie wiem, co jest w tej dobie" —
+   * zostaje wtedy sama kontrola długości pojedynczej zmiany, jak przed
+   * `work_sessions`. Zgadywanie byłoby gorsze niż nieocenienie.
+   */
+  dzien: DailySummary | null;
   onZamknij: () => void;
   onZapisano: (wynik: ZapisOdpowiedz) => void;
   /**
@@ -119,6 +132,7 @@ export function DodajWpis({
   token,
   dzisiaj,
   domyslnaData,
+  dzien,
   onZamknij,
   onZapisano,
   onDoKolejki,
@@ -238,9 +252,14 @@ export function DodajWpis({
       if (od.trim() !== '' && wyjazd === null) return zBledem('Nie rozumiem godziny wyjazdu.');
       if (doGodz.trim() !== '' && zjazd === null) return zBledem('Nie rozumiem godziny zjazdu.');
 
+      // Lista zmian TEGO dnia — do kontroli nakładania i sumy doby.
+      // Znamy ją tylko wtedy, gdy formularz otwarto na dniu, który jest
+      // wczytany; przy innej dacie zostaje sama kontrola długości.
+      const sesjeDnia = dzien !== null && dzien.date === (data ?? dzisiaj) ? dzien.sesje : [];
+
       return zOcena(
-        ocenZmiane(wyjazd, zjazd),
-        (klucz) => postZmiana(token, wyjazd, zjazd, data, klucz),
+        ocenZmiane(wyjazd, zjazd, sesjeDnia),
+        (klucz) => postZmiana(token, { od: wyjazd, do: zjazd, data }, klucz),
         { endpoint: '/api/v1/zmiana', cialo: { od: wyjazd, do: zjazd } }
       );
     }
@@ -292,12 +311,16 @@ export function DodajWpis({
   /**
    * Rodzaje, które serwer NADPISUJE.
    *
-   * `dystans`, `brutto` i `zmiana` idą przez upsert na `daily_records`, więc
-   * drugi zapis kasuje pierwszy bez śladu. Napiwki i paliwo to osobne wiersze
-   * i dodanie drugiego jest zwykle zamierzone — tam ostrzeżenie tylko
-   * przeszkadzałoby.
+   * `dystans` i `brutto` idą przez upsert na `daily_records`, więc drugi zapis
+   * kasuje pierwszy bez śladu. Napiwki i paliwo to osobne wiersze i dodanie
+   * drugiego jest zwykle zamierzone — tam ostrzeżenie tylko przeszkadzałoby.
+   *
+   * `zmiana` WYPADŁA z tej listy razem z `work_sessions`: każda zmiana to teraz
+   * osobny wiersz, więc druga niczego nie nadpisuje. Ostrzeżenie „nadpiszesz
+   * istniejący wpis" byłoby po prostu nieprawdą, a przy dwóch zmianach dziennie
+   * pojawiałoby się za każdym razem.
    */
-  const NADPISUJACE: Rodzaj[] = ['dystans', 'brutto', 'zmiana'];
+  const NADPISUJACE: Rodzaj[] = ['dystans', 'brutto'];
 
   /**
    * Usuwa z listy sesji wpis, który właśnie zostanie nadpisany.

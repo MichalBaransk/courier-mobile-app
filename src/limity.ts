@@ -158,17 +158,50 @@ export function ocenParagon(
  *
  * Bez tego literówka `10:00 → 09:00` wraca dopiero jako zdziwienie po zapisie.
  */
-export function ocenZmiane(od: string | null, doGodz: string | null): Ocena {
+function minutyGodziny(g: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(g);
+  if (!m?.[1] || !m[2]) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/**
+ * Zmiana jako przedział minut na osi doby wyjazdu.
+ *
+ * Odpowiednik `zakresSesji` z serwera (`finance.calc.ts`) — obie strony muszą
+ * dawać ten sam wynik, inaczej formularz przepuści coś, co serwer odrzuci.
+ * Trwająca zmiana kończy się w nieskończoności: wszystko, co zaczyna się po
+ * niej, na nią nachodzi, a wcześniejsze — nie.
+ */
+function zakres(sesja: { od: string; do: string | null }): { start: number; koniec: number } | null {
+  const start = minutyGodziny(sesja.od);
+  if (start === null) return null;
+  if (sesja.do === null) return { start, koniec: Number.POSITIVE_INFINITY };
+  const k = minutyGodziny(sesja.do);
+  if (k === null) return null;
+  return { start, koniec: k <= start ? k + 1440 : k };
+}
+
+/**
+ * Ocena zmiany — długość własna ORAZ to, jak wpada w resztę doby.
+ *
+ * `sesje` są opcjonalne, bo formularz nie zawsze zna dobę (np. wpis wstecz
+ * na dzień, którego karta nie jest wczytana). Bez nich zostaje sama kontrola
+ * długości — dokładnie to, co ta funkcja robiła przed `work_sessions`.
+ *
+ * Suma doby jest kontrolą OSOBNĄ od długości pojedynczej zmiany i nie da się
+ * jej z niej wyprowadzić: dziesięć zmian po dwie godziny to dwadzieścia godzin
+ * pracy, a każda z osobna mieści się w limicie bez mrugnięcia.
+ */
+export function ocenZmiane(
+  od: string | null,
+  doGodz: string | null,
+  sesje: ReadonlyArray<{ id: number; od: string; do: string | null }> = [],
+  pomijaneId: number | null = null
+): Ocena {
   if (od === null || doGodz === null) return CZYSTO;
 
-  const minuty = (g: string): number | null => {
-    const m = /^(\d{2}):(\d{2})$/.exec(g);
-    if (!m?.[1] || !m[2]) return null;
-    return Number(m[1]) * 60 + Number(m[2]);
-  };
-
-  const a = minuty(od);
-  const b = minuty(doGodz);
+  const a = minutyGodziny(od);
+  const b = minutyGodziny(doGodz);
   if (a === null || b === null) return CZYSTO;
 
   // Zjazd wcześniej niż wyjazd = przejechana północ, nie błąd (§8d).
@@ -187,6 +220,39 @@ export function ocenZmiane(od: string | null, doGodz: string | null): Ocena {
       ostrzezenie: `${od} – ${doGodz} to ${pl(Math.round(godzin * 10) / 10)} h. Serwer odrzuci zmianę dłuższą niż 16 h — sprawdź, czy godziny nie są zamienione.`,
     };
   }
+
+  const inne = sesje.filter((sz) => pomijaneId === null || sz.id !== pomijaneId);
+  const nowa = zakres({ od, do: doGodz });
+
+  if (nowa) {
+    for (const sz of inne) {
+      const z = zakres(sz);
+      if (z && nowa.start < z.koniec && z.start < nowa.koniec) {
+        return {
+          blad: null,
+          ostrzezenie:
+            sz.do === null
+              ? `Zmiana od ${sz.od} jeszcze trwa — serwer odrzuci drugą na te godziny.`
+              : `Te godziny nachodzą na zmianę ${sz.od} – ${sz.do}. Serwer to odrzuci.`,
+        };
+      }
+    }
+  }
+
+  const sumaInnych = inne.reduce((acc, sz) => {
+    if (sz.do === null) return acc;
+    const z = zakres(sz);
+    return z ? acc + (z.koniec - z.start) / 60 : acc;
+  }, 0);
+  const razem = Math.round((sumaInnych + godzin) * 100) / 100;
+
+  if (razem > 16) {
+    return {
+      blad: null,
+      ostrzezenie: `Razem wyszłoby ${pl(razem)} h w jednej dobie. Serwer odrzuci powyżej 16 h.`,
+    };
+  }
+
   return CZYSTO;
 }
 

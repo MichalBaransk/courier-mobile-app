@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { dataPoPolsku, godziny, km, litry, zl, zlZeZnakiem } from './format';
 import { iloraz } from './licz';
 import { C } from './theme';
-import type { DailySummary, DailyTotals, PeriodSummary, Saldo } from './types';
+import type { DailySummary, DailyTotals, PeriodSummary, Saldo, Sesja } from './types';
 
 /**
  * Karty prezentacyjne — czyste funkcje danych, bez pobierania i bez stanu.
@@ -46,6 +46,17 @@ export function Sekcja({ tytul, children }: { tytul: string; children: ReactNode
 /*  Dzień                                                                     */
 /* ========================================================================== */
 
+/**
+ * Długość jednej zmiany w godzinach. Odpowiednik `dlugoscSesjiH` z serwera.
+ * Trwająca zmiana to 0 h — nie „od wyjazdu do teraz", bo wtedy liczba rosłaby
+ * przy każdym renderowaniu, a suma doby i tak jej nie liczy.
+ */
+function dlugoscSesji(sz: Sesja): number {
+  if (sz.do === null) return 0;
+  const m = (g: string) => Number(g.slice(0, 2)) * 60 + Number(g.slice(3, 5));
+  return (((m(sz.do) - m(sz.od) + 1440) % 1440) || 1440) / 60;
+}
+
 export function KartaDnia({ dane }: { dane: DailySummary }) {
   const brakGodzin = dane.workHours === 0;
 
@@ -69,11 +80,28 @@ export function KartaDnia({ dane }: { dane: DailySummary }) {
         <Text style={s.przypis}>Napiwki nie wchodzą do przelewu — są już w kieszeni.</Text>
       </Sekcja>
 
-      <Sekcja tytul="ZMIANA">
-        <Wiersz
-          etykieta="Godziny"
-          wartosc={dane.workFrom && dane.workTo ? `${dane.workFrom} – ${dane.workTo}` : '—'}
-        />
+      <Sekcja tytul={dane.sesje.length > 1 ? `ZMIANY (${dane.sesje.length})` : 'ZMIANA'}>
+        {/* Lista zamiast jednej pary godzin: doba może mieć wiele zmian, a
+            `workFrom`–`workTo` jest wtedy tylko rozpiętością dnia, nie czasem
+            pracy. Trwająca zmiana nie pokazuje długości — patrz `dlugoscSesji`. */}
+        {dane.sesje.length === 0 ? (
+          <Wiersz etykieta="Godziny" wartosc="—" />
+        ) : (
+          dane.sesje.map((sz, idx) => (
+            <Wiersz
+              key={sz.id}
+              etykieta={dane.sesje.length > 1 ? `${idx + 1}. Godziny` : 'Godziny'}
+              wartosc={
+                sz.do === null
+                  ? `${sz.od} – trwa`
+                  : dane.sesje.length > 1
+                    ? `${sz.od} – ${sz.do} · ${godziny(dlugoscSesji(sz))}`
+                    : `${sz.od} – ${sz.do}`
+              }
+              kolor={sz.do === null ? C.akcent : C.tekst}
+            />
+          ))
+        )}
         <Wiersz etykieta="Czas pracy" wartosc={brakGodzin ? '—' : godziny(dane.workHours)} />
         <Wiersz
           etykieta="Stawka"

@@ -30,7 +30,16 @@ import type { DailySummary } from './types';
  */
 
 interface Pozycja {
+  /**
+   * Klucz stanu „czeka na potwierdzenie" / „w toku".
+   *
+   * NIE jest nim `cel`, bo pozycji z celem `SHIFT` jest tyle, ile zmian w dobie.
+   * Klucz to `SHIFT:41`, więc potwierdzenie jednej zmiany nie zapala drugiej.
+   */
+  klucz: string;
   cel: ZakresUsuniecia;
+  /** Numer zmiany — wyłącznie przy `cel: 'SHIFT'`. */
+  sesjaId?: number;
   etykieta: string;
   /** Co dokładnie zniknie — opis skutku, nie nazwa endpointu. */
   opis: string;
@@ -41,18 +50,21 @@ interface Pozycja {
 
 const POZYCJE: Pozycja[] = [
   {
+    klucz: 'LAST_TIP',
     cel: 'LAST_TIP',
     etykieta: 'Ostatni napiwek',
     opis: 'Kasuje jeden, najświeższy wpis napiwku.',
     teraz: (d) => (d.cashTipsTotal > 0 ? `razem ${zl(d.cashTipsTotal)}` : null),
   },
   {
+    klucz: 'ALL_TIPS',
     cel: 'ALL_TIPS',
     etykieta: 'Wszystkie napiwki',
     opis: 'Kasuje każdy napiwek z tego dnia.',
     teraz: (d) => (d.cashTipsTotal > 0 ? zl(d.cashTipsTotal) : null),
   },
   {
+    klucz: 'FUEL',
     cel: 'FUEL',
     etykieta: 'Paragony paliwowe',
     opis: 'Kasuje wszystkie tankowania z tego dnia.',
@@ -60,27 +72,41 @@ const POZYCJE: Pozycja[] = [
       d.fuelReceiptCount > 0 ? `${d.fuelReceiptCount} szt. · ${zl(d.fuelCost)}` : null,
   },
   {
+    klucz: 'LAST_SHIFT',
+    cel: 'LAST_SHIFT',
+    etykieta: 'Ostatnia zmiana',
+    opis: 'Kasuje jedną, najpóźniejszą zmianę dnia. Wcześniejsze zostają.',
+    teraz: (d) => {
+      const ostatnia = d.sesje.at(-1);
+      return ostatnia ? `${ostatnia.od} – ${ostatnia.do ?? 'trwa'}` : null;
+    },
+  },
+  {
+    klucz: 'HOURS',
     cel: 'HOURS',
-    etykieta: 'Godziny pracy',
-    opis: 'Czyści wyjazd, zjazd i czas pracy. Reszta dnia zostaje.',
+    etykieta: 'Wszystkie zmiany',
+    opis: 'Kasuje każdą zmianę z tego dnia. Reszta dnia zostaje.',
     teraz: (d) =>
-      d.workFrom || d.workTo
-        ? `${d.workFrom ?? '—'} – ${d.workTo ?? '—'} (${godziny(d.workHours)})`
+      d.sesje.length > 0
+        ? `${d.sesje.length} szt. · ${godziny(d.workHours)}`
         : null,
   },
   {
+    klucz: 'EARNINGS',
     cel: 'EARNINGS',
     etykieta: 'Zarobek brutto',
     opis: 'Czyści samo brutto. Napiwki i paliwo zostają.',
     teraz: (d) => (d.grossEarnings > 0 ? zl(d.grossEarnings) : null),
   },
   {
+    klucz: 'DISTANCE',
     cel: 'DISTANCE',
     etykieta: 'Dystans',
     opis: 'Czyści przejechane kilometry.',
     teraz: (d) => (d.distanceKm !== null && d.distanceKm > 0 ? km(d.distanceKm) : null),
   },
   {
+    klucz: 'ALL_DAY',
     cel: 'ALL_DAY',
     etykieta: 'Cały dzień',
     opis: 'Kasuje wpis dnia, napiwki i paragony. Nie da się tego cofnąć.',
@@ -111,11 +137,33 @@ export function UsunWpisy({
   onZamknij,
   onUsunieto,
 }: Props) {
-  const [potwierdzany, setPotwierdzany] = useState<ZakresUsuniecia | null>(null);
-  const [pracuje, setPracuje] = useState<ZakresUsuniecia | null>(null);
+  const [potwierdzany, setPotwierdzany] = useState<string | null>(null);
+  const [pracuje, setPracuje] = useState<string | null>(null);
   const [blad, setBlad] = useState<string | null>(null);
   /** Komunikat serwera — także ten o niepowodzeniu („Brak napiwków…"). */
   const [komunikat, setKomunikat] = useState<string | null>(null);
+
+  /**
+   * Lista pozycji = stałe wpisy PLUS jedna pozycja na każdą zmianę doby.
+   *
+   * Kasowanie idzie po `id` zmiany, nie po jej pozycji na liście: po skasowaniu
+   * pierwszej druga staje się pierwszą i przycisk odziedziczyłby cudzą rolę.
+   *
+   * Zmiany są PRZED „Wszystkie zmiany", żeby ten groźniejszy wariant nie stał
+   * pod kciukiem jako pierwszy.
+   */
+  const pozycje: Pozycja[] = [
+    ...POZYCJE.slice(0, 3),
+    ...(dzien?.sesje ?? []).map((sz, idx) => ({
+      klucz: `SHIFT:${sz.id}`,
+      cel: 'SHIFT' as const,
+      sesjaId: sz.id,
+      etykieta: `Zmiana ${idx + 1}`,
+      opis: 'Kasuje tę jedną zmianę. Pozostałe zostają.',
+      teraz: () => `${sz.od} – ${sz.do ?? 'trwa'}`,
+    })),
+    ...POZYCJE.slice(3),
+  ];
 
   const zamknij = () => {
     if (pracuje !== null) return;
@@ -125,20 +173,20 @@ export function UsunWpisy({
     onZamknij();
   };
 
-  const dotknij = async (cel: ZakresUsuniecia) => {
+  const dotknij = async (p: Pozycja) => {
     if (pracuje !== null) return;
 
-    if (potwierdzany !== cel) {
-      setPotwierdzany(cel);
+    if (potwierdzany !== p.klucz) {
+      setPotwierdzany(p.klucz);
       setBlad(null);
       setKomunikat(null);
       return;
     }
 
-    setPracuje(cel);
+    setPracuje(p.klucz);
     setBlad(null);
     try {
-      const wynik = await postUsun(token, cel, data);
+      const wynik = await postUsun(token, p.cel, data, p.sesjaId ?? null);
       setPotwierdzany(null);
       // `usuniete: false` to NIE jest błąd — to „nie było czego kasować".
       // Komunikat serwera mówi to wprost, więc pokazuję go bez tłumaczenia.
@@ -179,21 +227,21 @@ export function UsunWpisy({
 
           {blad ? <Text style={s.blad}>{blad}</Text> : null}
 
-          {POZYCJE.map((p) => {
+          {pozycje.map((p) => {
             const wartosc = dzien ? p.teraz(dzien) : null;
             const pusty = dzien !== null && wartosc === null && !p.grozny;
-            const czeka = potwierdzany === p.cel;
-            const wToku = pracuje === p.cel;
+            const czeka = potwierdzany === p.klucz;
+            const wToku = pracuje === p.klucz;
 
             return (
               <Pressable
-                key={p.cel}
+                key={p.klucz}
                 style={[
                   s.pozycja,
                   pusty && s.pozycjaPusta,
                   czeka && (p.grozny ? s.pozycjaGrozna : s.pozycjaCzekajaca),
                 ]}
-                onPress={() => dotknij(p.cel)}
+                onPress={() => void dotknij(p)}
                 disabled={pracuje !== null}
               >
                 <View style={s.pozycjaSrodek}>

@@ -131,6 +131,12 @@ function assertDailySummary(value: unknown): asserts value is DailySummary {
   ) {
     throw new ApiError('Serwer zwrócił dane w nieoczekiwanym formacie.', null);
   }
+
+  // Serwer sprzed `work_sessions` nie zna pola `sesje`. Uzupełniamy pustą
+  // listą ZAMIAST rzucać błędem: aplikacja i serwer wdrażają się osobno,
+  // a przez tych kilkanaście minut karta dnia ma pokazywać dane, nie awarię.
+  // Pusta lista jest tu prawdą — stary serwer po prostu nie ma czego oddać.
+  if (!Array.isArray(v.sesje)) v.sesje = [];
 }
 
 /** Metadane API. Używane też do sprawdzenia tokena przy pierwszym logowaniu. */
@@ -237,13 +243,45 @@ export const postDystans = (token: string, km: number, data: string | null, kluc
 export const postBrutto = (token: string, kwota: number, data: string | null, klucz?: string) =>
   zapisz('/api/v1/brutto', token, { kwota, data }, klucz);
 
-export const postZmiana = (
-  token: string,
-  od: string | null,
-  doGodz: string | null,
-  data: string | null,
-  klucz?: string
-) => zapisz('/api/v1/zmiana', token, { od, do: doGodz, data }, klucz);
+/**
+ * Zmiana pracy. Cztery przypadki rozstrzygane tym, co podasz:
+ *
+ * | `id` | `od` | `do` | co robi                                   |
+ * |------|------|------|-------------------------------------------|
+ * |  ✓   |  ✓   |  ✓   | poprawia wskazaną zmianę                  |
+ * |      |  ✓   |  ✓   | dopisuje kompletną (także wstecz)         |
+ * |      |  ✓   |      | otwiera                                   |
+ * |      |      |  ✓   | zamyka trwającą                           |
+ *
+ * `'TERAZ'` zamiast godziny znaczy „podstaw swój zegar". Używamy tego przy
+ * przycisku zmiany: zegar telefonu bywa przestawiony albo ma złą strefę,
+ * a o czasie ma decydować serwer — tak samo jak o dacie (§8a).
+ *
+ * `409` znaczy „masz już otwartą zmianę" i NIE jest błędem danych. Wołający
+ * ma to odróżnić od `400`, bo reakcja jest inna: zamknij tamtą, nie popraw wpis.
+ */
+export interface ZmianaWejscie {
+  /** `GG:MM` albo `'TERAZ'`. */
+  od?: string | null;
+  /** `GG:MM` albo `'TERAZ'`. */
+  do?: string | null;
+  data?: string | null;
+  /** Numer istniejącej zmiany — tylko przy poprawce, razem z obiema godzinami. */
+  id?: number | null;
+}
+
+export const postZmiana = (token: string, wejscie: ZmianaWejscie, klucz?: string) =>
+  zapisz(
+    '/api/v1/zmiana',
+    token,
+    {
+      od: wejscie.od ?? null,
+      do: wejscie.do ?? null,
+      data: wejscie.data ?? null,
+      id: wejscie.id ?? null,
+    },
+    klucz
+  );
 
 /* ========================================================================== */
 /*  Historia (krok 4)                                                         */
@@ -278,7 +316,12 @@ export type ZakresUsuniecia =
   | 'LAST_TIP'
   | 'ALL_TIPS'
   | 'FUEL'
+  /** WSZYSTKIE zmiany doby. Znaczenie niezmienione od czasów jednej pary godzin. */
   | 'HOURS'
+  /** Jedna wskazana zmiana — wymaga `sesjaId`. */
+  | 'SHIFT'
+  /** Ostatnia zmiana doby. Odpowiednik `LAST_TIP`. */
+  | 'LAST_SHIFT'
   | 'EARNINGS'
   | 'DISTANCE'
   | 'ALL_DAY';
@@ -292,12 +335,17 @@ export interface UsunOdpowiedz {
 export async function postUsun(
   token: string,
   cel: ZakresUsuniecia,
-  data: string | null
+  data: string | null,
+  sesjaId: number | null = null
 ): Promise<UsunOdpowiedz> {
-  const dane = await request<UsunOdpowiedz>('/api/v1/usun', token, { cel, data });
+  const dane = await request<UsunOdpowiedz>('/api/v1/usun', token, { cel, data, sesjaId });
   assertDailySummary(dane.dzien);
   return dane;
 }
+
+/** Kasowanie JEDNEJ wskazanej zmiany. Cukier na `postUsun` — czytelniej w miejscu wywołania. */
+export const usunSesje = (token: string, sesjaId: number, data: string | null) =>
+  postUsun(token, 'SHIFT', data, sesjaId);
 
 /* ========================================================================== */
 /*  Cele i oferty                                                             */

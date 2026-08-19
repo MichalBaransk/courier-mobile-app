@@ -17,6 +17,19 @@ export interface ApiInfo {
   dzisiaj: string;
 }
 
+/**
+ * Jedna zmiana pracy. `do === null` znaczy, że zmiana TRWA.
+ *
+ * Doba może mieć ich kilka — to jest sedno tabeli `work_sessions` po stronie
+ * serwera. Do kroku 30 aplikacja zakładała jedną parę godzin na dzień i to
+ * właśnie dlatego przycisk zmiany wyszarzał się po pierwszym zjeździe.
+ */
+export interface Sesja {
+  id: number;
+  od: string;
+  do: string | null;
+}
+
 export interface DailySummary {
   /** `YYYY-MM-DD` w strefie Europe/Warsaw. Nigdy UTC. */
   date: string;
@@ -29,9 +42,18 @@ export interface DailySummary {
   walletPayouts: number;
   /** netEarnings − walletPayouts. Może być ujemne i ma to być widoczne. */
   doPrzelewu: number;
+  /**
+   * Pierwszy wyjazd doby. Przy kilku zmianach to SKRÓT, nie cała prawda:
+   * 10:00–23:30 to 13,5 h zegarowych, a przepracowane może być 11,5 h.
+   * Do wyświetlania czasu pracy używaj `workHours`, nie tej pary.
+   */
   workFrom: string | null;
+  /** Ostatni zjazd doby. `null`, gdy ostatnia zmiana jeszcze trwa. */
   workTo: string | null;
+  /** SUMA godzin ze wszystkich zamkniętych zmian doby. Trwająca wnosi 0. */
   workHours: number;
+  /** Wszystkie zmiany doby, w kolejności wyjazdu. */
+  sesje: Sesja[];
   hourlyRateNetto: number;
   fuelCost: number;
   fuelLiters: number;

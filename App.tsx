@@ -623,25 +623,18 @@ function Aplikacja() {
   /**
    * „Trwa zmiana" — jeden warunek, dwa zastosowania.
    *
-   * Wyjazd zapisany, zjazd jeszcze nie, i to na DZISIAJ. Przeglądanie wpisu
-   * sprzed tygodnia nie jest pracą i nie ma prawa włączać ani GPS-a, ani
-   * podtrzymywania ekranu.
+   * Któraś ze zmian dnia jest niezamknięta, i to na DZISIAJ. Przeglądanie
+   * wpisu sprzed tygodnia nie jest pracą i nie ma prawa włączać ani GPS-a,
+   * ani podtrzymywania ekranu.
+   *
+   * Warunek szuka teraz OTWARTEJ ZMIANY na liście, a nie pary
+   * `workFrom != null && workTo == null`. Po wprowadzeniu `work_sessions`
+   * tamten warunek dawałby fałsz przy drugiej zmianie dnia: `workTo`
+   * pokazuje ostatni zjazd doby, więc po zamknięciu pierwszej zmiany był już
+   * ustawiony i druga, trwająca, nie włączyłaby GPS-a.
    */
   const zmianaTrwa =
-    dzien !== null &&
-    dzien.date === dzisiaj &&
-    dzien.workFrom !== null &&
-    dzien.workTo === null;
-
-  /**
-   * Dzisiejsza zmiana ma już oba końce.
-   *
-   * Baza trzyma JEDNĄ parę `work_from`/`work_to` na dzień, więc kolejny start
-   * nadpisałby godzinę wyjazdu i pierwsza zmiana zniknęłaby bez śladu.
-   * Przycisk jest wtedy nieaktywny — do czasu, aż powstanie `work_sessions`.
-   */
-  const zmianaZamknieta =
-    dzien !== null && dzien.date === dzisiaj && dzien.workFrom !== null && dzien.workTo !== null;
+    dzien !== null && dzien.date === dzisiaj && dzien.sesje.some((sz) => sz.do === null);
 
 
   /**
@@ -865,40 +858,42 @@ function Aplikacja() {
   /**
    * Start i koniec zmiany jednym dotknięciem.
    *
-   * Godzina pochodzi z zegara TELEFONU, nie z serwera. To świadome odstępstwo
-   * od §8a, który oddaje serwerowi decyzję o czasie — ale tam chodzi o DATĘ
-   * wpisu (doba kończy się o północy w Europe/Warsaw), a nie o godzinę, którą
-   * użytkownik i tak widzi na ekranie i mógłby wpisać ręcznie. Data nadal
-   * zostaje `null`, czyli wyznacza ją serwer.
+   * Godzinę podstawia SERWER. Wysyłamy słowo `'TERAZ'`, a nie odczyt
+   * `new Date()` z telefonu — bo zegar telefonu bywa przestawiony, strefa
+   * bywa zła, a §8a mówi, że o czasie decyduje serwer. Do kroku 30 leciała
+   * stąd godzina lokalna; to był świadomy dług i tu się kończy.
    *
-   * Docelowo lepiej: pozwolić wysłać „teraz" i pozwolić serwerowi podstawić
-   * własny `nowTimeWarsaw`. To zmiana po stronie API i wejdzie razem
-   * z `work_sessions`.
+   * Przycisk NIE jest już nigdy wyszarzony: doba może mieć wiele zmian,
+   * więc drugi start nie ma czego nadpisać.
    */
   const przelaczZmiane = useCallback(async () => {
-    if (!token || przelaczamZmiane || zmianaZamknieta) return;
-
-    const teraz = new Date();
-    const godzina = `${String(teraz.getHours()).padStart(2, '0')}:${String(
-      teraz.getMinutes()
-    ).padStart(2, '0')}`;
+    if (!token || przelaczamZmiane) return;
 
     setPrzelaczamZmiane(true);
     setBlad(null);
     try {
       // Zmiana trwa → zamykamy (`do`). Nie trwa → otwieramy (`od`).
       const wynik = zmianaTrwa
-        ? await postZmiana(token, null, godzina, null)
-        : await postZmiana(token, godzina, null, null);
+        ? await postZmiana(token, { do: 'TERAZ' })
+        : await postZmiana(token, { od: 'TERAZ' });
+
+      const otwarta = wynik.dzien.sesje.find((sz) => sz.do === null);
+      const ostatnia = wynik.dzien.sesje.at(-1);
 
       poZmianie(
         wynik.dzien,
-        wynik.ostrzezenie ?? (zmianaTrwa ? `Koniec zmiany ${godzina}.` : `Zmiana od ${godzina}.`)
+        wynik.ostrzezenie ??
+          (zmianaTrwa
+            ? `Koniec zmiany ${ostatnia?.do ?? ''}.`.trim()
+            : `Zmiana od ${otwarta?.od ?? ''}.`.trim())
       );
     } catch (err) {
-      // Zmiana NIE trafia do kolejki offline. Godzina wysłana cztery godziny
-      // później opisywałaby inny moment niż ten, w którym kliknąłeś — a to
+      // Zmiana NIE trafia do kolejki offline. `TERAZ` wysłane cztery godziny
+      // później opisywałoby inny moment niż ten, w którym kliknąłeś — a to
       // wprost psuje stawkę zł/h (§8d). Lepsza odmowa niż zmyślona godzina.
+      //
+      // 409 znaczy „masz niezamkniętą zmianę", zwykle z poprzedniego dnia.
+      // To nie jest awaria i komunikat serwera mówi wprost, co zrobić.
       setBlad(
         err instanceof ApiError
           ? err.message
@@ -907,7 +902,7 @@ function Aplikacja() {
     } finally {
       setPrzelaczamZmiane(false);
     }
-  }, [token, przelaczamZmiane, zmianaZamknieta, zmianaTrwa, poZmianie]);
+  }, [token, przelaczamZmiane, zmianaTrwa, poZmianie]);
 
   if (stan === 'wczytywanie') {
     return (
@@ -1278,7 +1273,6 @@ function Aplikacja() {
           setPanelUstawien(true);
         }}
         zmianaTrwa={zmianaTrwa}
-        zmianaZamknieta={zmianaZamknieta}
         onZmiana={() => void przelaczZmiane()}
         zajety={przelaczamZmiane}
       />
@@ -1306,6 +1300,7 @@ function Aplikacja() {
             token={token}
             dzisiaj={dzisiaj}
             domyslnaData={wybranyDzien}
+            dzien={dzien}
             onZamknij={() => setDodawanie(false)}
             onZapisano={(wynik: ZapisOdpowiedz) => {
               // Modal zostaje otwarty — zamyka go dopiero „Gotowe".

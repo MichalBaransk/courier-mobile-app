@@ -103,6 +103,53 @@ describe('ocenZmiane — godziny pracy (§8d)', () => {
     expect(ocenZmiane('11:30', null)).toEqual(CZYSTO);
     expect(ocenZmiane(null, '21:15')).toEqual(CZYSTO);
   });
+
+  it('bez listy zmian zachowuje się jak przed work_sessions', () => {
+    expect(ocenZmiane('11:30', '21:15')).toEqual(CZYSTO);
+  });
+
+  it('druga zmiana obok pierwszej przechodzi', () => {
+    expect(ocenZmiane('17:30', '23:30', [{ id: 1, od: '10:00', do: '14:00' }])).toEqual(CZYSTO);
+  });
+
+  it('styk 14:00/14:00 to nie konflikt', () => {
+    expect(ocenZmiane('14:00', '18:00', [{ id: 1, od: '10:00', do: '14:00' }])).toEqual(CZYSTO);
+  });
+
+  it('nakładanie ostrzega i podaje, na co', () => {
+    const o = ocenZmiane('13:00', '18:00', [{ id: 1, od: '10:00', do: '14:00' }]);
+    expect(o.ostrzezenie).toContain('10:00 – 14:00');
+  });
+
+  it('trwająca zmiana blokuje późniejszą, ale nie wcześniejszą', () => {
+    const sesje = [{ id: 1, od: '17:30', do: null }];
+    expect(ocenZmiane('19:00', '20:00', sesje).ostrzezenie).toContain('jeszcze trwa');
+    expect(ocenZmiane('08:00', '12:00', sesje)).toEqual(CZYSTO);
+  });
+
+  it('SUMA doby ponad 16 h ostrzega, choć każda zmiana z osobna jest w porządku', () => {
+    const sesje = [
+      { id: 1, od: '00:00', do: '06:00' },
+      { id: 2, od: '06:00', do: '12:00' },
+    ];
+    expect(ocenZmiane('12:00', '18:30', sesje).ostrzezenie).toContain('w jednej dobie');
+  });
+
+  it('dokładnie 16 h w dobie jeszcze przechodzi', () => {
+    expect(ocenZmiane('08:00', '16:00', [{ id: 1, od: '00:00', do: '08:00' }])).toEqual(CZYSTO);
+  });
+
+  it('poprawka zmiany nie koliduje sama ze sobą', () => {
+    expect(ocenZmiane('10:15', '14:30', [{ id: 7, od: '10:00', do: '14:00' }], 7)).toEqual(CZYSTO);
+  });
+
+  it('trwająca zmiana nie wchodzi do sumy doby', () => {
+    const sesje = [
+      { id: 1, od: '00:00', do: '15:00' },
+      { id: 2, od: '23:00', do: null },
+    ];
+    expect(ocenZmiane('16:00', '17:00', sesje)).toEqual(CZYSTO);
+  });
 });
 
 describe('polacz', () => {

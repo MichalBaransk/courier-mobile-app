@@ -48,17 +48,14 @@ export function PasekSekcji({
   onZmien,
   onWiecej,
   zmianaTrwa,
-  zmianaZamknieta,
   onZmiana,
   zajety,
 }: {
   aktywna: Sekcja;
   onZmien: (sekcja: Sekcja) => void;
   onWiecej: () => void;
-  /** Wyjazd zapisany, zjazdu brak — przycisk pokazuje „Koniec". */
+  /** Któraś ze zmian dnia jest niezamknięta — przycisk pokazuje „Koniec". */
   zmianaTrwa: boolean;
-  /** Dzisiejsza zmiana ma już oba końce — przycisk nieaktywny (patrz niżej). */
-  zmianaZamknieta: boolean;
   onZmiana: () => void;
   /** Żądanie w locie — blokuje podwójne kliknięcie. */
   zajety: boolean;
@@ -115,12 +112,7 @@ export function PasekSekcji({
         <View style={s.kreska} />
       </Pressable>
 
-      <PrzyciskZmiany
-        trwa={zmianaTrwa}
-        zamknieta={zmianaZamknieta}
-        zajety={zajety}
-        onPress={onZmiana}
-      />
+      <PrzyciskZmiany trwa={zmianaTrwa} zajety={zajety} onPress={onZmiana} />
     </View>
   );
 }
@@ -128,32 +120,28 @@ export function PasekSekcji({
 /**
  * Start i koniec zmiany — najczęstsza czynność dnia, więc na pasku.
  *
- * Do kroku 30 wymagało to wejścia w formularz i wpisania godziny. Teraz to
- * jedno dotknięcie, a godzinę bierze zegar telefonu.
+ * Jedno dotknięcie, godzinę podstawia SERWER (aplikacja wysyła `'TERAZ'`).
  *
- * ⚠️ OGRANICZENIE, KTÓRE ZNIKNIE DOPIERO Z `work_sessions`.
- *
- * Baza trzyma DZIŚ jedną parę `work_from`/`work_to` na dzień, z unikalnym
- * indeksem na `(telegram_id, date)`. Gdy dzisiejsza zmiana ma już oba końce,
- * przycisk jest NIEAKTYWNY — bo kolejny start nadpisałby godzinę wyjazdu
- * i pierwsza zmiana zniknęłaby bez śladu. Cicha utrata danych jest gorsza
- * niż wyszarzony przycisk.
+ * Stan „Zamknięta" ZNIKNĄŁ razem z `work_sessions`. Wcześniej baza trzymała
+ * jedną parę `work_from`/`work_to` na dzień, więc drugi start nadpisałby
+ * pierwszy i zmiana zniknęłaby bez śladu — przycisk był wtedy wyszarzany,
+ * bo cicha utrata danych jest gorsza niż nieaktywny przycisk. Teraz każda
+ * zmiana to osobny wiersz i nie ma czego nadpisać, więc przycisk jest
+ * aktywny zawsze poza czasem trwania żądania.
  */
 function PrzyciskZmiany({
   trwa,
-  zamknieta,
   zajety,
   onPress,
 }: {
   trwa: boolean;
-  zamknieta: boolean;
   zajety: boolean;
   onPress: () => void;
 }) {
-  const nieaktywny = zamknieta || zajety;
+  const nieaktywny = zajety;
 
   const ikona = trwa ? '⏹️' : '▶️';
-  const podpis = trwa ? 'Koniec' : zamknieta ? 'Zamknięta' : 'Start';
+  const podpis = trwa ? 'Koniec' : 'Start';
 
   return (
     <Pressable
@@ -166,7 +154,7 @@ function PrzyciskZmiany({
     >
       <Text style={[s.ikona, nieaktywny && s.przygaszona]}>{ikona}</Text>
       <Text
-        style={[s.podpis, trwa && s.podpisTrwa, !trwa && !zamknieta && s.podpisStart]}
+        style={[s.podpis, trwa && s.podpisTrwa, !trwa && s.podpisStart]}
         numberOfLines={1}
       >
         {podpis}
