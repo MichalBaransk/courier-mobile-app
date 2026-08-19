@@ -18,11 +18,18 @@ import { C } from './theme';
 
 export type Sekcja = 'kalendarz' | 'oferty' | 'cele' | 'portfel';
 
+/**
+ * Na pasku są TRZY sekcje, nie cztery.
+ *
+ * `portfel` przeniesiony do panelu „Więcej" (krok 30). Nadal jest pełnoprawną
+ * sekcją — zmienił się tylko sposób wejścia. Powód: pasek ma pięć miejsc,
+ * a najczęstsza czynność dnia (start i koniec zmiany) zasługuje na jedno
+ * z nich bardziej niż podgląd salda.
+ */
 const SEKCJE: Array<{ id: Sekcja; ikona: string; podpis: string }> = [
   { id: 'kalendarz', ikona: '📅', podpis: 'Kalendarz' },
   { id: 'oferty', ikona: '🛵', podpis: 'Oferty' },
   { id: 'cele', ikona: '🎯', podpis: 'Cele' },
-  { id: 'portfel', ikona: '💰', podpis: 'Portfel' },
 ];
 
 /**
@@ -40,10 +47,21 @@ export function PasekSekcji({
   aktywna,
   onZmien,
   onWiecej,
+  zmianaTrwa,
+  zmianaZamknieta,
+  onZmiana,
+  zajety,
 }: {
   aktywna: Sekcja;
   onZmien: (sekcja: Sekcja) => void;
   onWiecej: () => void;
+  /** Wyjazd zapisany, zjazdu brak — przycisk pokazuje „Koniec". */
+  zmianaTrwa: boolean;
+  /** Dzisiejsza zmiana ma już oba końce — przycisk nieaktywny (patrz niżej). */
+  zmianaZamknieta: boolean;
+  onZmiana: () => void;
+  /** Żądanie w locie — blokuje podwójne kliknięcie. */
+  zajety: boolean;
 }) {
   /**
    * PRAWDZIWY margines bezpieczny, nie przybliżenie.
@@ -85,7 +103,7 @@ export function PasekSekcji({
         style={s.przycisk}
         onPress={onWiecej}
         accessibilityRole="button"
-        accessibilityLabel="Więcej i ustawienia"
+        accessibilityLabel="Więcej, portfel i ustawienia"
       >
         <Text style={[s.ikona, s.przygaszona]}>⚙️</Text>
         <Text style={s.podpis} numberOfLines={1}>
@@ -96,7 +114,65 @@ export function PasekSekcji({
             przestają stać w jednej linii. */}
         <View style={s.kreska} />
       </Pressable>
+
+      <PrzyciskZmiany
+        trwa={zmianaTrwa}
+        zamknieta={zmianaZamknieta}
+        zajety={zajety}
+        onPress={onZmiana}
+      />
     </View>
+  );
+}
+
+/**
+ * Start i koniec zmiany — najczęstsza czynność dnia, więc na pasku.
+ *
+ * Do kroku 30 wymagało to wejścia w formularz i wpisania godziny. Teraz to
+ * jedno dotknięcie, a godzinę bierze zegar telefonu.
+ *
+ * ⚠️ OGRANICZENIE, KTÓRE ZNIKNIE DOPIERO Z `work_sessions`.
+ *
+ * Baza trzyma DZIŚ jedną parę `work_from`/`work_to` na dzień, z unikalnym
+ * indeksem na `(telegram_id, date)`. Gdy dzisiejsza zmiana ma już oba końce,
+ * przycisk jest NIEAKTYWNY — bo kolejny start nadpisałby godzinę wyjazdu
+ * i pierwsza zmiana zniknęłaby bez śladu. Cicha utrata danych jest gorsza
+ * niż wyszarzony przycisk.
+ */
+function PrzyciskZmiany({
+  trwa,
+  zamknieta,
+  zajety,
+  onPress,
+}: {
+  trwa: boolean;
+  zamknieta: boolean;
+  zajety: boolean;
+  onPress: () => void;
+}) {
+  const nieaktywny = zamknieta || zajety;
+
+  const ikona = trwa ? '⏹️' : '▶️';
+  const podpis = trwa ? 'Koniec' : zamknieta ? 'Zamknięta' : 'Start';
+
+  return (
+    <Pressable
+      style={[s.przycisk, nieaktywny && s.nieaktywny]}
+      onPress={nieaktywny ? undefined : onPress}
+      disabled={nieaktywny}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: nieaktywny }}
+      accessibilityLabel={trwa ? 'Zakończ zmianę' : 'Rozpocznij zmianę'}
+    >
+      <Text style={[s.ikona, nieaktywny && s.przygaszona]}>{ikona}</Text>
+      <Text
+        style={[s.podpis, trwa && s.podpisTrwa, !trwa && !zamknieta && s.podpisStart]}
+        numberOfLines={1}
+      >
+        {podpis}
+      </Text>
+      <View style={[s.kreska, trwa && s.kreskaTrwa]} />
+    </Pressable>
   );
 }
 
@@ -123,4 +199,10 @@ const s = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   kreskaAktywna: { backgroundColor: C.akcent },
+  kreskaTrwa: { backgroundColor: C.ostrzezenie },
+  // Trwająca zmiana świeci ostrzegawczo, bo to stan, o którym trzeba pamiętać:
+  // zapomniany zjazd psuje stawkę zł/h i prognozy celów (§8d).
+  podpisTrwa: { color: C.ostrzezenie, fontWeight: '700' },
+  podpisStart: { color: C.akcent, fontWeight: '700' },
+  nieaktywny: { opacity: 0.35 },
 });

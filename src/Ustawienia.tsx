@@ -24,11 +24,19 @@ export function PanelUstawien({
   ustawienia,
   onZmien,
   onZamknij,
+  onPortfel,
+  blokadaEkranu,
+  onZwolnijBlokade,
 }: {
   widoczny: boolean;
   ustawienia: Ustawienia;
   onZmien: (zmiana: Partial<Ustawienia>) => void;
   onZamknij: () => void;
+  /** Portfel zszedł z dolnego paska w kroku 30 — wejście jest tutaj. */
+  onPortfel: () => void;
+  /** Czy aplikacja UWAŻA, że trzyma blokadę ekranu. Patrz `Diagnostyka`. */
+  blokadaEkranu: boolean;
+  onZwolnijBlokade: () => void;
 }) {
   const insets = useSafeAreaInsets();
 
@@ -55,6 +63,15 @@ export function PanelUstawien({
           </View>
 
           <ScrollView style={s.lista} contentContainerStyle={s.listaWnetrze}>
+            <Pressable style={s.wejscie} onPress={onPortfel} accessibilityRole="button">
+              <Text style={s.wejscieIkona}>💰</Text>
+              <View style={s.wierszTekst}>
+                <Text style={s.wierszTytul}>Portfel Glovo</Text>
+                <Text style={s.wierszOpis}>Saldo i historia transakcji.</Text>
+              </View>
+              <Text style={s.wejscieStrzalka}>›</Text>
+            </Pressable>
+
             <Przelacznik
               tytul="Ekran nie gaśnie na zmianie"
               opis="Działa tylko przy otwartej zmianie. Poza pracą nic nie robi."
@@ -77,11 +94,47 @@ export function PanelUstawien({
               wylaczony={!ustawienia.wysylajPozycje}
             />
 
+            <Diagnostyka blokada={blokadaEkranu} onZwolnij={onZwolnijBlokade} />
+
             <WersjaAplikacji />
           </ScrollView>
         </View>
       </View>
     </Modal>
+  );
+}
+
+/**
+ * Diagnostyka blokady ekranu.
+ *
+ * DLACZEGO TO ISTNIEJE. Zgłoszenie z terenu: „ekran świeci się cały czas,
+ * niezależnie od przełącznika". Kod ma warunek i zależność na tym przełączniku,
+ * więc powinien reagować — a nie reaguje. Dwie hipotezy już upadły (wyścig,
+ * flaga zaległa po aktualizacji OTA), więc zamiast wymyślać trzecią, pokazujemy
+ * stan wprost.
+ *
+ * Ten znacznik mówi, co aplikacja **uważa**, że zrobiła. Jeśli pokazuje
+ * „zdjęta", a ekran nadal się nie wygasza, to znaczy, że problem leży poza
+ * naszym kodem — w systemie albo w module natywnym. To zupełnie inny błąd niż
+ * „aplikacja nie zauważyła przełącznika" i szuka się go gdzie indziej.
+ *
+ * Przycisk zwalnia blokadę bezwarunkowo, także wtedy, gdy stan mówi „zdjęta" —
+ * właśnie po to, żeby dało się sprawdzić przypadek rozjazdu.
+ */
+function Diagnostyka({ blokada, onZwolnij }: { blokada: boolean; onZwolnij: () => void }) {
+  return (
+    <View style={s.stopka}>
+      <Text style={s.stopkaTytul}>Diagnostyka</Text>
+      <View style={s.stopkaWiersz}>
+        <Text style={s.stopkaEtykieta}>Blokada ekranu</Text>
+        <Text style={[s.stopkaWartosc, { color: blokada ? C.ostrzezenie : C.tekstPrzygaszony }]}>
+          {blokada ? 'założona' : 'zdjęta'}
+        </Text>
+      </View>
+      <Pressable style={s.przyciskDiag} onPress={onZwolnij} accessibilityRole="button">
+        <Text style={s.przyciskDiagTekst}>Zwolnij blokadę ręcznie</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -192,7 +245,24 @@ const s = StyleSheet.create({
   wierszTekst: { flex: 1 },
   wierszTytul: { color: C.tekst, fontSize: 16, fontWeight: '600' },
   wierszOpis: { color: C.tekstPrzygaszony, fontSize: 13, lineHeight: 18, marginTop: 3 },
+  wejscie: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+  },
+  wejscieIkona: { fontSize: 22 },
+  wejscieStrzalka: { color: C.tekstPrzygaszony, fontSize: 26 },
   stopka: { marginTop: 18, paddingTop: 12, borderTopWidth: 1, borderColor: C.obramowanie },
+  przyciskDiag: {
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.obramowanie,
+    alignItems: 'center',
+  },
+  przyciskDiagTekst: { color: C.tekst, fontSize: 14 },
   stopkaTytul: { color: C.tekstPrzygaszony, fontSize: 12, letterSpacing: 1, marginBottom: 8 },
   stopkaWiersz: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   stopkaEtykieta: { color: C.tekstPrzygaszony, fontSize: 13 },

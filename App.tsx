@@ -23,6 +23,7 @@ import {
   getSaldo,
   getToday,
   postLokalizacja,
+  postZmiana,
   wyslijZKolejki,
   type UsunOdpowiedz,
   type ZapisOdpowiedz,
@@ -263,6 +264,9 @@ function Aplikacja() {
   const [tydzien, setTydzien] = useState<TydzienPracy>(PUSTY_TYDZIEN);
   const [ustawienia, setUstawienia] = useState<Ustawienia>(USTAWIENIA_DOMYSLNE);
   const [panelUstawien, setPanelUstawien] = useState(false);
+  /** Czy aplikacja UWAŻA, że trzyma blokadę ekranu. Patrz `Diagnostyka`. */
+  const [blokadaEkranu, setBlokadaEkranu] = useState(false);
+  const [przelaczamZmiane, setPrzelaczamZmiane] = useState(false);
   const [edytorTygodnia, setEdytorTygodnia] = useState(false);
   const [kwotaCelu, setKwotaCelu] = useState<number | null>(null);
 
@@ -630,6 +634,42 @@ function Aplikacja() {
     dzien.workTo === null;
 
   /**
+   * Dzisiejsza zmiana ma już oba końce.
+   *
+   * Baza trzyma JEDNĄ parę `work_from`/`work_to` na dzień, więc kolejny start
+   * nadpisałby godzinę wyjazdu i pierwsza zmiana zniknęłaby bez śladu.
+   * Przycisk jest wtedy nieaktywny — do czasu, aż powstanie `work_sessions`.
+   */
+  const zmianaZamknieta =
+    dzien !== null && dzien.date === dzisiaj && dzien.workFrom !== null && dzien.workTo !== null;
+
+
+  /**
+   * Sprzątanie po poprzedniej sesji — JEDEN RAZ, przy starcie.
+   *
+   * DLACZEGO TO ISTNIEJE (zgłoszone z terenu 19.08.2026):
+   * „ekran świeci się cały czas, niezależnie od przełącznika".
+   *
+   * `activateKeepAwakeAsync` ustawia flagę na oknie aplikacji po stronie
+   * Androida. Wersja z kroku 26 miała wyścig i potrafiła tę flagę zostawić
+   * założoną. Aktualizacja OTA **przeładowuje JavaScript, ale nie ubija
+   * procesu** — więc flaga z poprzedniej sesji zostaje, a nowy kod nic o niej
+   * nie wie i nie ma jak jej zdjąć.
+   *
+   * To samo dotyczy każdego przyszłego przeładowania: `expo-updates` wymienia
+   * kod pod działającym oknem. Zwolnienie na starcie jest tanie i zamyka całą
+   * klasę takich sytuacji, nie tylko tę jedną.
+   *
+   * Kolejność ma znaczenie: ten efekt jest zadeklarowany PRZED efektem
+   * zakładającym blokadę, więc przy pierwszym renderowaniu najpierw zwalnia,
+   * a dopiero potem tamten zakłada, jeśli ma powód.
+   */
+  useEffect(() => {
+    deactivateKeepAwake('ZMIANA');
+    setBlokadaEkranu(false);
+  }, []);
+
+  /**
    * Ekran nie gaśnie, dopóki trwa zmiana.
    *
    * Telefon w uchwycie na kierownicy, w rękawicach — wybudzanie go przy każdym
@@ -659,7 +699,11 @@ function Aplikacja() {
 
     void activateKeepAwakeAsync('ZMIANA').then(
       () => {
-        if (anulowane) deactivateKeepAwake('ZMIANA');
+        if (anulowane) {
+          deactivateKeepAwake('ZMIANA');
+          return;
+        }
+        setBlokadaEkranu(true);
       },
       () => {
         /* Brak podtrzymania ekranu nie jest powodem do przerywania pracy. */
@@ -669,6 +713,7 @@ function Aplikacja() {
     return () => {
       anulowane = true;
       deactivateKeepAwake('ZMIANA');
+      setBlokadaEkranu(false);
     };
   }, [zmianaTrwa, ustawienia.ekranNieGasnie]);
 
@@ -816,6 +861,53 @@ function Aplikacja() {
     },
     [token, miesiac, dzisiaj, pobierzMiesiac, pobierzCele, pobierzOdniesienie, wyslijKolejke]
   );
+
+  /**
+   * Start i koniec zmiany jednym dotknięciem.
+   *
+   * Godzina pochodzi z zegara TELEFONU, nie z serwera. To świadome odstępstwo
+   * od §8a, który oddaje serwerowi decyzję o czasie — ale tam chodzi o DATĘ
+   * wpisu (doba kończy się o północy w Europe/Warsaw), a nie o godzinę, którą
+   * użytkownik i tak widzi na ekranie i mógłby wpisać ręcznie. Data nadal
+   * zostaje `null`, czyli wyznacza ją serwer.
+   *
+   * Docelowo lepiej: pozwolić wysłać „teraz" i pozwolić serwerowi podstawić
+   * własny `nowTimeWarsaw`. To zmiana po stronie API i wejdzie razem
+   * z `work_sessions`.
+   */
+  const przelaczZmiane = useCallback(async () => {
+    if (!token || przelaczamZmiane || zmianaZamknieta) return;
+
+    const teraz = new Date();
+    const godzina = `${String(teraz.getHours()).padStart(2, '0')}:${String(
+      teraz.getMinutes()
+    ).padStart(2, '0')}`;
+
+    setPrzelaczamZmiane(true);
+    setBlad(null);
+    try {
+      // Zmiana trwa → zamykamy (`do`). Nie trwa → otwieramy (`od`).
+      const wynik = zmianaTrwa
+        ? await postZmiana(token, null, godzina, null)
+        : await postZmiana(token, godzina, null, null);
+
+      poZmianie(
+        wynik.dzien,
+        wynik.ostrzezenie ?? (zmianaTrwa ? `Koniec zmiany ${godzina}.` : `Zmiana od ${godzina}.`)
+      );
+    } catch (err) {
+      // Zmiana NIE trafia do kolejki offline. Godzina wysłana cztery godziny
+      // później opisywałaby inny moment niż ten, w którym kliknąłeś — a to
+      // wprost psuje stawkę zł/h (§8d). Lepsza odmowa niż zmyślona godzina.
+      setBlad(
+        err instanceof ApiError
+          ? err.message
+          : 'Nie udało się zapisać zmiany. Spróbuj z formularza.'
+      );
+    } finally {
+      setPrzelaczamZmiane(false);
+    }
+  }, [token, przelaczamZmiane, zmianaZamknieta, zmianaTrwa, poZmianie]);
 
   if (stan === 'wczytywanie') {
     return (
@@ -1185,6 +1277,10 @@ function Aplikacja() {
           setPotwierdzenie(null);
           setPanelUstawien(true);
         }}
+        zmianaTrwa={zmianaTrwa}
+        zmianaZamknieta={zmianaZamknieta}
+        onZmiana={() => void przelaczZmiane()}
+        zajety={przelaczamZmiane}
       />
 
       <PanelUstawien
@@ -1192,6 +1288,15 @@ function Aplikacja() {
         ustawienia={ustawienia}
         onZmien={zmienUstawienia}
         onZamknij={() => setPanelUstawien(false)}
+        onPortfel={() => {
+          setPanelUstawien(false);
+          setSekcja('portfel');
+        }}
+        blokadaEkranu={blokadaEkranu}
+        onZwolnijBlokade={() => {
+          deactivateKeepAwake('ZMIANA');
+          setBlokadaEkranu(false);
+        }}
       />
 
       {token ? (
