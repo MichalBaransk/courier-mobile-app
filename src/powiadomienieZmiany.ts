@@ -20,6 +20,18 @@ import { czySledzenieChodzi } from './gpsTlo';
  * DWA ŹRÓDŁA, JEDNO POWIADOMIENIE. Gdy usługa GPS już wisi w pasku, NIE
  * dokładamy drugiego — dwa wpisy o tej samej rzeczy czyta się jak usterkę.
  * Stąd `czySledzenieChodzi()` w `pokazPowiadomienieZmiany`.
+ *
+ * Które z dwóch widzisz, mówi Ci przy okazji, czy GPS pracuje:
+ *
+ * | wpis w pasku | znaczenie |
+ * |---|---|
+ * | „Zmiana trwa — Wysyłam pozycję…" (usługa Androida) | zmiana leci, GPS pracuje |
+ * | „Zmiana trwa — GPS nie wysyła pozycji" (ten plik)   | zmiana leci, pozycji nie ma |
+ * | brak wpisu                                          | zmiany nie ma |
+ *
+ * Trzeci wiersz jest wart tyle, co dwa pierwsze — dlatego wpis jest odtwarzany
+ * przy każdym powrocie aplikacji na wierzch (`przebudzenia` w `App.tsx`),
+ * a nie tylko zakładany raz przy otwarciu zmiany.
  */
 
 const KANAL = 'zmiana';
@@ -85,7 +97,16 @@ export async function pokazPowiadomienieZmiany(od: string | null): Promise<void>
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: 'Zmiana trwa',
-        body: od === null ? 'Pamiętaj o zjeździe.' : `Od ${od}. Pamiętaj o zjeździe.`,
+        /**
+         * Treść mówi wprost, że pozycja NIE leci.
+         *
+         * Ten wpis pojawia się wyłącznie wtedy, gdy śledzenia w tle nie ma —
+         * gdy jest, w pasku wisi powiadomienie usługi GPS („Wysyłam pozycję…").
+         * Dwa różne zdania zamiast jednego to jedyny sposób, żeby po samym
+         * pasku dało się poznać, czy GPS pracuje.
+         */
+        body:
+          (od === null ? '' : `Od ${od} · `) + 'GPS nie wysyła pozycji. Pamiętaj o zjeździe.',
         // Android: wpisu nie da się zdjąć machnięciem…
         sticky: true,
         // …ani przypadkowym dotknięciem.

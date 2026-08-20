@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { dataPoPolsku, godziny, km, litry, numerZmiany, zl, zlZeZnakiem } from './format';
+import { minutTrwania } from './limity';
 import { iloraz } from './licz';
 import { C } from './theme';
 import type { DailySummary, DailyTotals, PeriodSummary, Saldo, Sesja } from './types';
@@ -50,11 +51,26 @@ export function Sekcja({ tytul, children }: { tytul: string; children: ReactNode
  * Długość jednej zmiany w godzinach. Odpowiednik `dlugoscSesjiH` z serwera.
  * Trwająca zmiana to 0 h — nie „od wyjazdu do teraz", bo wtedy liczba rosłaby
  * przy każdym renderowaniu, a suma doby i tak jej nie liczy.
+ *
+ * ⚠️ TU BYŁ BŁĄD, zgłoszony z telefonu 20.08: zmiana `20:07 – 20:07`
+ * pokazywała **24 h**, mimo że suma godzin dnia była poprawna.
+ *
+ * Winowajcą było `|| 1440` w tym wyrażeniu. Zero minut jest wartością
+ * fałszywą w JavaScripcie, więc `||` podmieniało je na pełną dobę. Przy
+ * dolnym progu 0,25 h po stronie serwera zerowa zmiana nie miała prawa
+ * powstać i nikt tego nie widział — próg zniknął w P22 i błąd wyszedł
+ * następnego dnia.
+ *
+ * To ta sama pomyłka, co `diffMinutes <= 0` w `calculateHours` na serwerze:
+ * **zero potraktowane jak brak.** Trzeci raz w tym projekcie.
+ *
+ * Liczy teraz `minutTrwania()` z `limity.ts` — ta sama funkcja, której używa
+ * pytanie „na pewno zamknąć?", pod testem. Dwie kopie tej samej arytmetyki
+ * to dwa miejsca na tę samą pomyłkę.
  */
 function dlugoscSesji(sz: Sesja): number {
   if (sz.do === null) return 0;
-  const m = (g: string) => Number(g.slice(0, 2)) * 60 + Number(g.slice(3, 5));
-  return (((m(sz.do) - m(sz.od) + 1440) % 1440) || 1440) / 60;
+  return (minutTrwania(sz.od, sz.do) ?? 0) / 60;
 }
 
 export function KartaDnia({ dane }: { dane: DailySummary }) {

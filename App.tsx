@@ -673,6 +673,15 @@ function Aplikacja() {
    */
   const [otwartaOd, setOtwartaOd] = useState<string | null | undefined>(undefined);
 
+  /**
+   * Licznik powrotów aplikacji na wierzch.
+   *
+   * Służy do jednego: wymusza ponowne uzgodnienie powiadomienia i śledzenia.
+   * Zwykła zmienna by nie wystarczyła — efekt reaguje na zależności, a te
+   * muszą się REALNIE zmienić, żeby przebiegł drugi raz.
+   */
+  const [przebudzenia, setPrzebudzenia] = useState(0);
+
   /** Każda odpowiedź dotycząca DZISIAJ aktualizuje stan zmiany. Inne dni ignorujemy. */
   useEffect(() => {
     if (dzien === null || dzisiaj === null || dzien.date !== dzisiaj) return;
@@ -840,7 +849,7 @@ function Aplikacja() {
   }, [stan, token, zmianaTrwa, ustawienia.wysylajPozycje, ustawienia.wysokaDokladnosc]);
 
   /**
-   * Uzgodnienie tła ze stanem zmiany — zatrzymywanie.
+   * Uzgodnienie stanu: śledzenie i powiadomienie kontra rzeczywistość.
    *
    * OSOBNY EFEKT, bo śledzenie w tle celowo nie jest sprzątane przez `return`
    * tamtego. Tamten efekt uruchamia; ten pilnuje, żeby to, co zastaliśmy, było
@@ -850,6 +859,17 @@ function Aplikacja() {
    * zmianę w Telegramie, odpalasz aplikację — a usługa pierwszoplanowa chodzi
    * dalej, bo nikt jej nie kazał przestać. Druga zapora, na wypadek gdybyś
    * aplikacji w ogóle nie otworzył, siedzi w samym zadaniu (`czyOsierocone`).
+   *
+   * DZIAŁA TEŻ W DRUGĄ STRONĘ — i to jest zmiana z P24. Powiadomienie miało
+   * wisieć „dopóki trwa zmiana", a wisiało tylko dopóty, dopóki nic go nie
+   * zdjęło. Padnie usługa GPS (cofnięta zgoda, oszczędzanie baterii, system
+   * ubija usługę), zniknie razem z nią wpis w pasku — i przy trwającej zmianie
+   * nie ma ŻADNEGO powiadomienia. `pokazPowiadomienieZmiany` jest tu
+   * wywoływane bezwarunkowo przy trwającej zmianie właśnie po to: samo
+   * sprawdza, czy jest co odtwarzać.
+   *
+   * Stąd `przebudzenia` w zależnościach: każdy powrót aplikacji na wierzch
+   * jest okazją do sprawdzenia, czy pasek nadal mówi prawdę.
    */
   useEffect(() => {
     // `undefined` = nie wiemy, jak jest. Zatrzymywanie czegokolwiek na tej
@@ -878,7 +898,7 @@ function Aplikacja() {
         await schowajPowiadomienieZmiany();
       }
     })();
-  }, [stan, zmianaTrwa, otwartaOd, ustawienia.wysylajPozycje]);
+  }, [stan, zmianaTrwa, otwartaOd, ustawienia.wysylajPozycje, przebudzenia]);
 
   /**
    * Powrót z tła to najlepszy moment na ponowienie.
@@ -889,7 +909,11 @@ function Aplikacja() {
    */
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nowyStan: string) => {
-      if (nowyStan === 'active') void wyslijKolejke(true);
+      if (nowyStan !== 'active') return;
+      void wyslijKolejke(true);
+      // Przy okazji: sprawdzamy, czy powiadomienie o zmianie nadal wisi
+      // i czy śledzenie nadal chodzi. Powody w efekcie uzgadniającym.
+      setPrzebudzenia((n) => n + 1);
     });
     return () => sub.remove();
   }, [wyslijKolejke]);
