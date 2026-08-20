@@ -86,7 +86,7 @@ export function WykresyDni({
         <SlupkiDni
           seria={netto}
           formatuj={(v) => String(Math.round(v))}
-          odniesienie={cd === null ? null : { wartosc: cd, opis: 'cel dzienny' }}
+          odniesienie={cd === null ? null : { wartosc: cd }}
         />
       </KartaWykresu>
 

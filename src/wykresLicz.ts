@@ -286,6 +286,30 @@ export function histogramStawek(oferty: CourseOfferItem[], szerokosc = 0.5): Kos
   return kosze;
 }
 
+/**
+ * Gdzie kosz stawek leży względem progu opłacalności.
+ *
+ * Kosz PRZECIĘTY progiem jest osobną kategorią, nie „nad" i nie „pod".
+ * Kosz 2,00–2,50 przy progu 2,30 zawiera i kursy do wzięcia, i do odrzucenia;
+ * pomalowanie go na zielono zawyżałoby obrazek dokładnie na granicy, czyli
+ * tam, gdzie decyzja jest najtrudniejsza.
+ *
+ * Zwracamy słowo, a nie kolor — `wykresLicz.ts` nie wie nic o motywie i ma
+ * o nim nie wiedzieć. Ta sama granica, co między `finance.calc.ts` a kartami
+ * bota.
+ */
+export type PolozenieKosza = 'nad' | 'przeciety' | 'pod';
+
+export function polozenieKosza(
+  od: number,
+  doGranicy: number,
+  prog: number | null
+): PolozenieKosza {
+  if (prog === null || od >= prog) return 'nad';
+  if (doGranicy <= prog) return 'pod';
+  return 'przeciety';
+}
+
 export interface KoszGodziny {
   /** Godzina doby, 0–23. */
   godzina: number;

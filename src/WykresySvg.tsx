@@ -121,54 +121,60 @@ function Siatka({
 }
 
 /**
- * Podpisy dni na osi poziomej.
+ * Podpisy pod osią poziomą.
  *
- * Trzydzieści jeden liczb pod rząd zlewa się w szarą wstęgę, więc pokazujemy
- * co piątą i zawsze pierwszy oraz ostatni dzień zakresu. Bez tego wykres
- * miesiąca nie mówi, którego dnia dotyczy szczyt.
+ * `podpis: null` znaczy „nic tu nie pisz". Trzydzieści jeden liczb pod rząd
+ * zlewa się w szarą wstęgę, więc o tym, które etykiety w ogóle powstają,
+ * decyduje ten, kto zna dane — a nie rysownik.
  */
-function PodpisyDni({ seria, szerokosc }: { seria: PunktDnia[]; szerokosc: number }) {
+function PodpisyOsi({ seria, szerokosc }: { seria: PunktSlupka[]; szerokosc: number }) {
   const krok = (szerokosc - LEWY) / Math.max(1, seria.length);
 
   return (
     <G>
-      {seria.map((p, i) => {
-        const ostatni = i === seria.length - 1;
-        if (i !== 0 && !ostatni && (i + 1) % 5 !== 0) return null;
-
-        const dzien = Number.parseInt(p.data.slice(8, 10), 10);
-        return (
+      {seria.map((p, i) =>
+        p.podpis === null ? null : (
           <SvgText
-            key={p.data}
+            key={p.klucz}
             x={LEWY + krok * (i + 0.5)}
             y={GORNY + WYS + 12}
             fill={C.tekstPrzygaszony}
             fontSize={9}
             textAnchor="middle"
           >
-            {dzien}
+            {p.podpis}
           </SvgText>
-        );
-      })}
+        )
+      )}
     </G>
   );
 }
 
 /* ========================================================================== */
-/*  Słupki dzień po dniu                                                      */
+/*  Słupki                                                                    */
 /* ========================================================================== */
 
-export function SlupkiDni({
+export interface PunktSlupka {
+  /** Klucz Reacta. Data, numer kosza, godzina — cokolwiek unikalnego w serii. */
+  klucz: string;
+  /** Etykieta pod słupkiem. `null` = pomijamy, żeby oś się nie zlała. */
+  podpis: string | null;
+  wartosc: number | null;
+  /** Kolor tego jednego słupka. Brak = kolor całej serii. */
+  kolor?: string;
+}
+
+export function Slupki({
   seria,
   kolor = C.akcent,
   formatuj,
   odniesienie,
 }: {
-  seria: PunktDnia[];
+  seria: PunktSlupka[];
   kolor?: string;
   formatuj: (v: number) => string;
-  /** Pozioma linia porównawcza (np. cel dzienny). `null` = bez linii. */
-  odniesienie?: { wartosc: number; opis: string } | null;
+  /** Pozioma linia porównawcza (cel dzienny, próg opłacalności). */
+  odniesienie?: { wartosc: number } | null;
 }) {
   const szerokosc = useSzerokosc();
   const os = zakresOsi([...seria.map((p) => p.wartosc), odniesienie?.wartosc ?? null]);
@@ -186,12 +192,12 @@ export function SlupkiDni({
         const y = GORNY + naY(p.wartosc, os, WYS);
         return (
           <Rect
-            key={p.data}
+            key={p.klucz}
             x={LEWY + krok * i + (krok - szerSlupka) / 2}
             y={y}
             width={szerSlupka}
             height={Math.max(1, GORNY + WYS - y)}
-            fill={kolor}
+            fill={p.kolor ?? kolor}
             rx={1.5}
           />
         );
@@ -209,9 +215,48 @@ export function SlupkiDni({
         />
       ) : null}
 
-      <PodpisyDni seria={seria} szerokosc={szerokosc} />
+      <PodpisyOsi seria={seria} szerokosc={szerokosc} />
     </Svg>
   );
+}
+
+/**
+ * Słupki dzień po dniu — `Slupki` z etykietami dat.
+ *
+ * Numer dnia co piąty plus zawsze pierwszy i ostatni. Bez tego wykres miesiąca
+ * nie mówi, którego dnia dotyczy szczyt, a z pełnym kompletem — nie da się go
+ * przeczytać.
+ */
+export function SlupkiDni({
+  seria,
+  kolor,
+  formatuj,
+  odniesienie,
+}: {
+  seria: PunktDnia[];
+  kolor?: string;
+  formatuj: (v: number) => string;
+  odniesienie?: { wartosc: number } | null;
+}) {
+  return (
+    <Slupki
+      seria={naSlupkiDni(seria)}
+      {...(kolor !== undefined ? { kolor } : {})}
+      formatuj={formatuj}
+      odniesienie={odniesienie ?? null}
+    />
+  );
+}
+
+export function naSlupkiDni(seria: PunktDnia[]): PunktSlupka[] {
+  return seria.map((p, i) => ({
+    klucz: p.data,
+    podpis:
+      i === 0 || i === seria.length - 1 || (i + 1) % 5 === 0
+        ? String(Number.parseInt(p.data.slice(8, 10), 10))
+        : null,
+    wartosc: p.wartosc,
+  }));
 }
 
 /* ========================================================================== */
@@ -271,7 +316,7 @@ export function LiniaDni({
         </G>
       ))}
 
-      <PodpisyDni seria={serie[0]?.punkty ?? []} szerokosc={szerokosc} />
+      <PodpisyOsi seria={naSlupkiDni(serie[0]?.punkty ?? [])} szerokosc={szerokosc} />
     </Svg>
   );
 }

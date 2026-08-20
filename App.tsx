@@ -73,6 +73,7 @@ import { DOMYSLNE as USTAWIENIA_DOMYSLNE, type Ustawienia } from './src/ustawien
 import { wczytajUstawienia, zapiszUstawienia } from './src/ustawieniaMagazyn';
 import { KalendarzMiesiaca } from './src/Wykresy';
 import { WykresyDni } from './src/WykresyDni';
+import { WykresyOfert } from './src/WykresyOfert';
 import { C } from './src/theme';
 import type {
   ApiInfo,
@@ -1251,11 +1252,16 @@ function Aplikacja() {
 
         {/* ================= WYKRESY ============================================= */}
         {sekcja === 'wykresy' && miesiac !== null ? (
-          <WykresyDni
-            dni={dniMiesiaca}
-            zakres={zakresMiesiaca(miesiac)}
-            cel={cele?.miesiac ?? null}
-          />
+          <>
+            <WykresyDni
+              dni={dniMiesiaca}
+              zakres={zakresMiesiaca(miesiac)}
+              cel={cele?.miesiac ?? null}
+            />
+            {/* Oferty CAŁEGO miesiąca, nie `ofertyWidoku`. Rozkład stawek
+                z jednego dnia to kilkanaście słupków po jednym. */}
+            <WykresyOfert oferty={oferty} minStawka={info?.minStawkaNettoKm ?? null} />
+          </>
         ) : null}
 
         {/* ================= PORTFEL ============================================= */}

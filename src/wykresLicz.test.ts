@@ -7,6 +7,7 @@ import {
   naY,
   ofertyWgGodziny,
   podzialDecyzji,
+  polozenieKosza,
   profilTygodnia,
   sciezkaLamanej,
   seriaDni,
@@ -299,5 +300,34 @@ describe('sciezkaLamanej — dziura przerywa linię', () => {
 
   it('wartość maksymalna ląduje na górze obszaru', () => {
     expect(sciezkaLamanej([p('a', 100)], os, 10, uklad)).toBe('M5.0 0.0');
+  });
+});
+
+describe('polozenieKosza — próg opłacalności', () => {
+  it('kosz w całości nad progiem', () => {
+    expect(polozenieKosza(2.5, 3, 2.3)).toBe('nad');
+  });
+
+  it('kosz w całości pod progiem', () => {
+    expect(polozenieKosza(1.5, 2, 2.3)).toBe('pod');
+  });
+
+  it('kosz przecięty progiem to OSOBNA kategoria, nie „nad"', () => {
+    // 2,00-2,50 przy progu 2,30 zawiera i kursy do wzięcia, i do odrzucenia.
+    expect(polozenieKosza(2, 2.5, 2.3)).toBe('przeciety');
+  });
+
+  it('kosz kończący się DOKŁADNIE na progu jest pod nim', () => {
+    // Próg to minimum, więc stawka równa progowi jest jeszcze do przyjęcia —
+    // ale górna granica kosza jest wyłączna, więc nic z niego progu nie sięga.
+    expect(polozenieKosza(1.8, 2.3, 2.3)).toBe('pod');
+  });
+
+  it('kosz zaczynający się DOKŁADNIE na progu jest nad nim', () => {
+    expect(polozenieKosza(2.3, 2.8, 2.3)).toBe('nad');
+  });
+
+  it('bez znanego progu nie malujemy na czerwono', () => {
+    expect(polozenieKosza(0, 0.5, null)).toBe('nad');
   });
 });
