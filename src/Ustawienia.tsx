@@ -3,9 +3,8 @@ import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 
-import { czyTloDostepne } from './gpsTlo';
-
-import { stanTla, type StanTla } from './gpsTlo';
+import { odczytajAwarie, skasujAwarie, type Awaria } from './awaria';
+import { czyTloDostepne, stanTla, type StanTla } from './gpsTlo';
 import { C } from './theme';
 import type { Ustawienia } from './ustawienia';
 
@@ -204,12 +203,16 @@ function Diagnostyka({
   widoczny: boolean;
 }) {
   const [tlo, setTlo] = useState<StanTla | null>(null);
+  const [awaria, setAwaria] = useState<Awaria | null>(null);
 
   useEffect(() => {
     if (!widoczny) return;
     let aktualne = true;
     void stanTla().then((s) => {
       if (aktualne) setTlo(s);
+    });
+    void odczytajAwarie().then((a) => {
+      if (aktualne) setAwaria(a);
     });
     return () => {
       aktualne = false;
@@ -237,6 +240,28 @@ function Diagnostyka({
       <Tak etykieta="Śledzenie w tle chodzi" wartosc={tlo?.chodzi} />
 
       {tlo?.powod != null ? <Text style={s.powod}>Ostatnia odmowa: {tlo.powod}</Text> : null}
+
+      {/* Ostatnia awaria — zapisana przez `pilnujAwarii()` w `index.ts`.
+          Po wywaleniu aplikacji komunikat przepada; bez tego zapisu zostaje
+          tylko „wywala mnie, chyba w ustawieniach". */}
+      {awaria !== null ? (
+        <View style={s.awaria}>
+          <Text style={s.powod}>
+            Ostatnia awaria{awaria.smiertelny ? ' (śmiertelna)' : ''}: {awaria.komunikat}
+          </Text>
+          <Text style={s.stos}>{awaria.stos}</Text>
+          <Pressable
+            style={s.przyciskDiag}
+            onPress={() => {
+              void skasujAwarie();
+              setAwaria(null);
+            }}
+            accessibilityRole="button"
+          >
+            <Text style={s.przyciskDiagTekst}>Skasuj zapis awarii</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <Pressable style={s.przyciskDiag} onPress={onZwolnij} accessibilityRole="button">
         <Text style={s.przyciskDiagTekst}>Zwolnij blokadę ręcznie</Text>
@@ -442,4 +467,6 @@ const s = StyleSheet.create({
   stopkaEtykieta: { color: C.tekstPrzygaszony, fontSize: 13 },
   stopkaWartosc: { color: C.tekst, fontSize: 13, maxWidth: '60%' },
   powod: { color: C.blad, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  awaria: { marginTop: 6 },
+  stos: { color: C.tekstPrzygaszony, fontSize: 10, lineHeight: 14, marginTop: 4 },
 });

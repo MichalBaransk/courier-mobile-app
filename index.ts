@@ -8,6 +8,17 @@ import 'react-native-gesture-handler';
 
 import { registerRootComponent } from 'expo';
 
+import { pilnujAwarii } from './src/awaria';
+
+/**
+ * Zapis awarii PRZED czymkolwiek innym.
+ *
+ * Im wcześniej, tym więcej złapie — błąd przy wczytywaniu `App` też jest
+ * awarią i też chcemy go zobaczyć w Diagnostyce, a nie zgadywać z opisu
+ * „wywala mnie, chyba w ustawieniach".
+ */
+pilnujAwarii();
+
 import App from './App';
 
 /**

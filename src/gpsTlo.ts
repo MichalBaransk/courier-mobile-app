@@ -1,4 +1,4 @@
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
@@ -222,6 +222,32 @@ export async function zapytajOZgodeTla(): Promise<boolean> {
  */
 export async function uruchomSledzenieTla(wysokaDokladnosc: boolean): Promise<boolean> {
   try {
+    /**
+     * ANDROID 12+ NIE POZWALA URUCHOMIĆ USŁUGI PIERWSZOPLANOWEJ Z TŁA.
+     *
+     * Komunikat systemu brzmi dokładnie: „Foreground service cannot be started
+     * when the application is in the background". Zgłoszone z telefonu 20.08 —
+     * diagnostyka pokazała go jako ostatnią odmowę.
+     *
+     * Skąd w ogóle próba startu przy schowanej aplikacji: efekt uruchamiający
+     * śledzenie reaguje na zmiany stanu, a stan zmienia się także wtedy, gdy
+     * nikt nie patrzy (dochodzi odpowiedź z serwera, ustawia się godzina
+     * wyjazdu). Każde takie doczytanie ponawiało start i dostawało odmowę,
+     * kasując przy okazji zapisany powód.
+     *
+     * Sprawdzenie jest TUTAJ, a nie tylko u wywołującego, bo ta funkcja ma
+     * kilka wejść i każde inaczej by o tym zapomniało. Odmowa nie jest błędem:
+     * powrót aplikacji na wierzch wywołuje uzgodnienie jeszcze raz
+     * (`przebudzenia` w `App.tsx`) i wtedy start się uda.
+     */
+    if (AppState.currentState !== 'active') {
+      await zapiszPowod(
+        'Android nie pozwala uruchomić usługi, gdy aplikacja jest w tle. ' +
+          'Spróbuję ponownie, gdy wrócisz do aplikacji.'
+      );
+      return false;
+    }
+
     if (!(await czyTloDostepne())) {
       await zapiszPowod('Brak modułu expo-task-manager w tym APK — potrzebny nowy build.');
       return false;

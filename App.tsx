@@ -682,6 +682,19 @@ function Aplikacja() {
    */
   const [przebudzenia, setPrzebudzenia] = useState(0);
 
+  /**
+   * Godzina wyjazdu widziana przez efekt uruchamiający śledzenie.
+   *
+   * Przez `ref`, a nie przez zależność — patrz komentarz przy tamtym efekcie.
+   * W skrócie: ta wartość doczytuje się z serwera także przy schowanej
+   * aplikacji, a każde przebiegnięcie tamtego efektu to próba uruchomienia
+   * usługi pierwszoplanowej, której Android z tła nie wpuszcza.
+   */
+  const otwartaOdRef = useRef<string | null>(null);
+  useEffect(() => {
+    otwartaOdRef.current = otwartaOd ?? null;
+  }, [otwartaOd]);
+
   /** Każda odpowiedź dotycząca DZISIAJ aktualizuje stan zmiany. Inne dni ignorujemy. */
   useEffect(() => {
     if (dzien === null || dzisiaj === null || dzien.date !== dzisiaj) return;
@@ -840,7 +853,7 @@ function Aplikacja() {
        * wystartował pierwszy). Wołamy więc wprost: stały identyfikator sprawia,
        * że to podmiana, a nie drugie powiadomienie.
        */
-      await zapewnijPowiadomienieZmiany(otwartaOd);
+      await zapewnijPowiadomienieZmiany(otwartaOdRef.current);
 
       if (!(await czyJestZgoda())) {
         const zgoda = await zapytajOZgode();
@@ -861,7 +874,15 @@ function Aplikacja() {
       zatrzymane = true;
       zatrzymaj?.();
     };
-  }, [stan, token, zmianaTrwa, otwartaOd, ustawienia.wysylajPozycje, ustawienia.wysokaDokladnosc]);
+    // ⚠️ `otwartaOd` CELOWO POZA ZALEŻNOŚCIAMI — czytamy je przez `ref`.
+    //
+    // Dołożyłem je tu w P27 i to był błąd: godzina wyjazdu doczytuje się
+    // z serwera, więc zmienia się także przy SCHOWANEJ aplikacji. Efekt
+    // przebiegał wtedy jeszcze raz i próbował uruchomić usługę
+    // pierwszoplanową z tła, czego Android 12+ zabrania. Ta wartość jest tu
+    // potrzebna wyłącznie do TREŚCI powiadomienia i nie ma prawa decydować
+    // o ponownym starcie GPS-a.
+  }, [stan, token, zmianaTrwa, ustawienia.wysylajPozycje, ustawienia.wysokaDokladnosc]);
 
   /**
    * Uzgodnienie stanu: śledzenie i powiadomienie kontra rzeczywistość.
