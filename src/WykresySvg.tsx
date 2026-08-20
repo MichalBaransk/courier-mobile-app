@@ -3,6 +3,7 @@ import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from 'react-native-
 
 import { C } from './theme';
 import {
+  ktoreEtykiety,
   linieSiatki,
   naY,
   sciezkaLamanej,
@@ -42,6 +43,19 @@ const LEWY = 40;
 const DOLNY = 16;
 /** Górny oddech, żeby najwyższy słupek nie dotykał krawędzi karty. */
 const GORNY = 8;
+/**
+ * Zapas z prawej.
+ *
+ * Bez niego ostatni słupek kończy się dokładnie na krawędzi obrazka i wygląda
+ * na przycięty, a podpis pod nim — wyśrodkowany względem swojego pola —
+ * wystaje połową poza `Svg` i znika. Widoczne na godzinie 23.
+ */
+const PRAWY = 12;
+
+/** Szerokość jednego pola serii. Jedno miejsce, bo liczą to trzy komponenty. */
+function krokOsi(szerokosc: number, ile: number): number {
+  return (szerokosc - LEWY - PRAWY) / Math.max(1, ile);
+}
 
 const SIATKA = C.obramowanie;
 
@@ -57,12 +71,18 @@ function useSzerokosc(): number {
 
 export function KartaWykresu({
   tytul,
+  osY,
+  osX,
   podpis,
   pusty,
   komunikatPusty,
   children,
 }: {
   tytul: string;
+  /** Co znaczą liczby na osi pionowej, np. „zł". */
+  osY: string;
+  /** Co znaczą podpisy na osi poziomej, np. „dzień miesiąca". */
+  osX: string;
   podpis?: string;
   /** `true` = nie ma czego rysować; zamiast pustej osi pokazujemy zdanie. */
   pusty: boolean;
@@ -76,7 +96,12 @@ export function KartaWykresu({
         <Text style={s.pusto}>{komunikatPusty}</Text>
       ) : (
         <>
+          {/* Jednostka osi Y stoi NAD wykresem, poziomo.
+              Obrócony napis z boku byłby ładniejszy, ale zjadałby szerokość
+              rysunku na telefonie i trzeba by go czytać z przekrzywioną głową. */}
+          <Text style={s.osY}>{osY}</Text>
           {children}
+          <Text style={s.osX}>{osX}</Text>
           {podpis !== undefined ? <Text style={s.podpis}>{podpis}</Text> : null}
         </>
       )}
@@ -128,7 +153,7 @@ function Siatka({
  * decyduje ten, kto zna dane — a nie rysownik.
  */
 function PodpisyOsi({ seria, szerokosc }: { seria: PunktSlupka[]; szerokosc: number }) {
-  const krok = (szerokosc - LEWY) / Math.max(1, seria.length);
+  const krok = krokOsi(szerokosc, seria.length);
 
   return (
     <G>
@@ -178,7 +203,7 @@ export function Slupki({
 }) {
   const szerokosc = useSzerokosc();
   const os = zakresOsi([...seria.map((p) => p.wartosc), odniesienie?.wartosc ?? null]);
-  const krok = (szerokosc - LEWY) / Math.max(1, seria.length);
+  const krok = krokOsi(szerokosc, seria.length);
   // Zawsze zostaje szczelina między słupkami, ale przy 31 dniach słupek nie
   // może zejść poniżej 1 px, bo znika.
   const szerSlupka = Math.max(1, krok * 0.68);
@@ -249,12 +274,10 @@ export function SlupkiDni({
 }
 
 export function naSlupkiDni(seria: PunktDnia[]): PunktSlupka[] {
+  const etykiety = ktoreEtykiety(seria.length);
   return seria.map((p, i) => ({
     klucz: p.data,
-    podpis:
-      i === 0 || i === seria.length - 1 || (i + 1) % 5 === 0
-        ? String(Number.parseInt(p.data.slice(8, 10), 10))
-        : null,
+    podpis: etykiety.has(i) ? String(Number.parseInt(p.data.slice(8, 10), 10)) : null,
     wartosc: p.wartosc,
   }));
 }
@@ -283,7 +306,7 @@ export function LiniaDni({
   const wszystkie = serie.flatMap((s) => s.punkty.map((p) => p.wartosc));
   const os = zakresOsi(wszystkie);
   const dlugosc = Math.max(1, ...serie.map((s) => s.punkty.length));
-  const krok = (szerokosc - LEWY) / dlugosc;
+  const krok = krokOsi(szerokosc, dlugosc);
 
   return (
     <Svg width={szerokosc} height={GORNY + WYS + DOLNY}>
@@ -355,6 +378,8 @@ const s = StyleSheet.create({
     marginBottom: 10,
   },
   podpis: { color: C.tekstPrzygaszony, fontSize: 11, lineHeight: 16, marginTop: 8 },
+  osY: { color: C.tekstPrzygaszony, fontSize: 10, marginBottom: 2 },
+  osX: { color: C.tekstPrzygaszony, fontSize: 10, textAlign: 'center', marginTop: 2 },
   pusto: { color: C.tekstPrzygaszony, fontSize: 12, lineHeight: 18 },
 
   legenda: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 },

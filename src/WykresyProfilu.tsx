@@ -47,6 +47,8 @@ export function WykresyProfilu({ dni, zakres }: { dni: DailyTotals[]; zakres: Za
     <>
       <KartaWykresu
         tytul="ŚREDNI ZAROBEK WG DNIA TYGODNIA"
+        osY="zł netto (średnia z dnia)"
+        osX="dzień tygodnia"
         pusty={!sąDni}
         komunikatPusty="Za mało przepracowanych dni, żeby liczyć średnie."
         podpis="Średnia z dni, w których pracowałeś. Dni wolne NIE wchodzą do średniej — inaczej każdy wolny poniedziałek ciągnąłby poniedziałki w dół i wyszłoby, że to najgorszy dzień tygodnia."
@@ -56,6 +58,8 @@ export function WykresyProfilu({ dni, zakres }: { dni: DailyTotals[]; zakres: Za
 
       <KartaWykresu
         tytul="ŚREDNIA STAWKA ZŁ/H WG DNIA TYGODNIA"
+        osY="zł na godzinę"
+        osX="dzień tygodnia"
         pusty={!sąDni}
         komunikatPusty="Żaden dzień w tym miesiącu nie ma zapisanych godzin."
         podpis={
@@ -73,6 +77,8 @@ export function WykresyProfilu({ dni, zakres }: { dni: DailyTotals[]; zakres: Za
 
       <KartaWykresu
         tytul="PALIWO NA TLE ZAROBKU"
+        osY="zł, suma od 1. dnia"
+        osX="dzień miesiąca"
         pusty={sumaPaliwa <= 0}
         komunikatPusty="Brak zatankowanych paragonów w tym miesiącu."
         podpis={
@@ -98,6 +104,8 @@ export function WykresyProfilu({ dni, zakres }: { dni: DailyTotals[]; zakres: Za
 
       <KartaWykresu
         tytul="ZŁ NA PRZEJECHANY KILOMETR"
+        osY="zł netto na kilometr"
+        osX="dzień miesiąca"
         pusty={zlKm.every((p) => p.wartosc === null)}
         komunikatPusty="Żaden dzień nie ma zapisanego dystansu."
         podpis="Netto dnia podzielone przez kilometry z licznika — inna wielkość niż stawka oferty. Tamta liczy kilometry JEDNEGO kursu, ta wszystkie przejechane, razem z pustymi przejazdami między zamówieniami."

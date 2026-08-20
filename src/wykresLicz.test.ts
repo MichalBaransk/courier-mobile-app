@@ -6,6 +6,7 @@ import {
   narastajaco,
   naY,
   ofertyWgGodziny,
+  ktoreEtykiety,
   podzialDecyzji,
   polozenieKosza,
   profilTygodnia,
@@ -344,5 +345,40 @@ describe("seriaDni 'zlKm' — dzień bez kilometrów nie ma stawki", () => {
     // Zero czytałoby się na wykresie jak „jechał za darmo".
     const dni = [dzien({ date: '2026-08-01', totalNetto: 100, distanceKm: 0 })];
     expect(seriaDni(dni, zakres, 'zlKm')[0]?.wartosc).toBeNull();
+  });
+});
+
+describe('ktoreEtykiety — podpisy osi się nie zlewają', () => {
+  it('przy 31 dniach nie podpisuje 30 i 31 obok siebie', () => {
+    // To był realny błąd na ekranie: wyszło z tego „3031".
+    const e = ktoreEtykiety(31);
+    expect(e.has(30)).toBe(true);
+    expect(e.has(29)).toBe(false);
+  });
+
+  it('zawsze podpisuje pierwszą i ostatnią pozycję', () => {
+    for (const ile of [28, 29, 30, 31]) {
+      const e = ktoreEtykiety(ile);
+      expect(e.has(0)).toBe(true);
+      expect(e.has(ile - 1)).toBe(true);
+    }
+  });
+
+  it('przy 30 dniach ostatni podpis wypada równo i nic nie ustępuje', () => {
+    const e = ktoreEtykiety(30);
+    expect([...e].sort((a, b) => a - b)).toEqual([0, 4, 9, 14, 19, 24, 29]);
+  });
+
+  it('żadne dwa podpisy nie stoją bliżej niż minimalny odstęp', () => {
+    for (const ile of [1, 2, 3, 7, 28, 29, 30, 31]) {
+      const kolejne = [...ktoreEtykiety(ile)].sort((a, b) => a - b);
+      for (let i = 1; i < kolejne.length; i++) {
+        expect(kolejne[i]! - kolejne[i - 1]!).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('pusta seria nie ma podpisów', () => {
+    expect(ktoreEtykiety(0).size).toBe(0);
   });
 });

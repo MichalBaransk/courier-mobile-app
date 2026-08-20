@@ -183,6 +183,38 @@ export function narastajaco(seria: PunktDnia[]): PunktDnia[] {
   });
 }
 
+/**
+ * Które pozycje serii dostają podpis na osi poziomej.
+ *
+ * POWSTAŁO Z BŁĘDU WIDOCZNEGO NA EKRANIE. Pierwsza wersja podpisywała co piątą
+ * pozycję ORAZ zawsze ostatnią. Przy 31 dniach dawało to podpisy 30 i 31 obok
+ * siebie, a że oba mają po dwie cyfry i mieszczą się w jednym kroku osi,
+ * na telefonie wyszło z tego `3031` — jedna liczba bez znaczenia.
+ *
+ * Reguła: co `co`-ta pozycja plus pierwsza, a ostatnia zawsze — ale jeśli
+ * ostatnia stoi bliżej niż `minOdstep` od poprzedniego podpisu, to poprzedni
+ * ustępuje. Koniec zakresu jest ważniejszy niż równy rytm: „31" mówi, że
+ * miesiąc się skończył, „30" nie mówi nic, czego nie widać obok.
+ */
+export function ktoreEtykiety(ile: number, co = 5, minOdstep = 3): Set<number> {
+  if (ile <= 0) return new Set();
+
+  const wybrane: number[] = [];
+  for (let i = 0; i < ile; i++) {
+    if (i === 0 || (i + 1) % co === 0) wybrane.push(i);
+  }
+
+  const ostatni = ile - 1;
+  if (!wybrane.includes(ostatni)) {
+    while (wybrane.length > 0 && ostatni - wybrane[wybrane.length - 1]! < minOdstep) {
+      wybrane.pop();
+    }
+    wybrane.push(ostatni);
+  }
+
+  return new Set(wybrane);
+}
+
 /* ========================================================================== */
 /*  Profil tygodnia                                                           */
 /* ========================================================================== */

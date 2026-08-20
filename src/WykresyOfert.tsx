@@ -75,6 +75,8 @@ export function WykresyOfert({
     <>
       <KartaWykresu
         tytul="ROZKŁAD STAWEK ZŁ/KM"
+        osY="ile ofert"
+        osX="stawka zł/km — dolna granica kosza"
         pusty={histogram.length === 0}
         komunikatPusty="Żadna oferta w tym miesiącu nie ma policzonego dystansu."
         podpis={
@@ -88,6 +90,8 @@ export function WykresyOfert({
 
       <KartaWykresu
         tytul="OFERTY WG GODZINY DOBY"
+        osY="ile ofert"
+        osX="godzina doby"
         pusty={oferty.length === 0}
         komunikatPusty="Brak ocenionych ofert w tym miesiącu."
         podpis="Ile ofert oceniłeś w danej godzinie. To mówi o TWOICH godzinach pracy, nie o tym, kiedy Glovo wysyła kursy — nie ocenisz oferty, gdy nie jesteś na zmianie."
@@ -97,6 +101,8 @@ export function WykresyOfert({
 
       <KartaWykresu
         tytul="ŚREDNIA STAWKA WG GODZINY"
+        osY="zł/km (średnia)"
+        osX="godzina doby"
         pusty={godziny.every((g) => g.sredniaStawka === null)}
         komunikatPusty="Za mało ofert z dystansem, żeby liczyć średnie."
         podpis={
@@ -110,6 +116,8 @@ export function WykresyOfert({
 
       <KartaWykresu
         tytul="CO ZROBIŁEŚ Z OFERTAMI"
+        osY="szerokość paska = udział w liczbie ofert"
+        osX={`razem ${oferty.length} ofert w tym miesiącu`}
         pusty={oferty.length === 0}
         komunikatPusty="Brak ocenionych ofert w tym miesiącu."
         podpis={

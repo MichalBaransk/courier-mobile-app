@@ -75,6 +75,8 @@ export function WykresyDni({
 
       <KartaWykresu
         tytul="NETTO DZIEŃ PO DNIU"
+        osY="zł netto (z napiwkami)"
+        osX="dzień miesiąca"
         pusty={!sąDane}
         komunikatPusty="Brak zarobków w tym miesiącu."
         podpis={
@@ -92,6 +94,8 @@ export function WykresyDni({
 
       <KartaWykresu
         tytul="NARASTAJĄCO W MIESIĄCU"
+        osY="zł netto, suma od 1. dnia"
+        osX="dzień miesiąca"
         pusty={!sąDane}
         komunikatPusty="Nie ma jeszcze czego sumować."
         podpis={
@@ -121,6 +125,8 @@ export function WykresyDni({
 
       <KartaWykresu
         tytul="STAWKA ZŁ/H"
+        osY="zł na godzinę"
+        osX="dzień miesiąca"
         pusty={!sąStawki}
         komunikatPusty="Żaden dzień w tym miesiącu nie ma zapisanych godzin."
         podpis="Przerwa w linii to dzień bez pracy. Stawka liczona z netto i sumy zmian — paliwo jej NIE pomniejsza."
@@ -133,6 +139,8 @@ export function WykresyDni({
 
       <KartaWykresu
         tytul="GODZINY PRACY"
+        osY="godziny (suma zmian)"
+        osX="dzień miesiąca"
         pusty={!sąGodziny}
         komunikatPusty="Brak zapisanych zmian w tym miesiącu."
         podpis="Suma wszystkich zmian z doby — od kroku z `work_sessions` dzień może mieć ich kilka."
