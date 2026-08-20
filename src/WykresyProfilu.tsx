@@ -3,7 +3,7 @@ import type { Zakres } from './okresy';
 import { C } from './theme';
 import type { DailyTotals } from './types';
 import { KartaWykresu, Legenda, LiniaDni, Slupki, type PunktSlupka } from './WykresySvg';
-import { narastajaco, profilTygodnia, seriaDni } from './wykresLicz';
+import { narastajaco, profilTygodnia, seriaDni, zakresZDanymi } from './wykresLicz';
 
 /**
  * Profil tygodnia i koszty — trzecia partia wykresów.
@@ -29,9 +29,12 @@ export function WykresyProfilu({ dni, zakres }: { dni: DailyTotals[]; zakres: Za
     wartosc: p.sredniaZlH,
   }));
 
+  // Narastające zostają na pełnym miesiącu — suma od pierwszego dnia to
+  // właśnie to, co mają pokazywać. Stawka na kilometr zawęża się do dni
+  // z danymi, jak reszta wykresów dziennych.
   const netto = narastajaco(seriaDni(dni, zakres, 'netto'));
   const paliwo = narastajaco(seriaDni(dni, zakres, 'paliwo'));
-  const zlKm = seriaDni(dni, zakres, 'zlKm');
+  const zlKm = seriaDni(dni, zakresZDanymi(dni, zakres), 'zlKm');
 
   const sumaNetto = netto.at(-1)?.wartosc ?? 0;
   const sumaPaliwa = paliwo.at(-1)?.wartosc ?? 0;

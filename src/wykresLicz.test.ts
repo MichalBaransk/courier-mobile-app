@@ -7,11 +7,13 @@ import {
   naY,
   ofertyWgGodziny,
   ktoreEtykiety,
+  przytnijPuste,
   podzialDecyzji,
   polozenieKosza,
   profilTygodnia,
   sciezkaLamanej,
   seriaDni,
+  zakresZDanymi,
   zakresOsi,
 } from './wykresLicz';
 import type { CourseOfferItem, DailyTotals } from './types';
@@ -380,5 +382,73 @@ describe('ktoreEtykiety — podpisy osi się nie zlewają', () => {
 
   it('pusta seria nie ma podpisów', () => {
     expect(ktoreEtykiety(0).size).toBe(0);
+  });
+});
+
+describe('zakresZDanymi — oś kończy się tam, gdzie dane', () => {
+  const sierpien = { od: '2026-08-01', do: '2026-08-31' };
+
+  it('zawęża 31 dni do tych, w których cokolwiek jest', () => {
+    const dni = [
+      dzien({ date: '2026-08-10', totalNetto: 100, workHours: 5 }),
+      dzien({ date: '2026-08-20', totalNetto: 120, workHours: 6 }),
+    ];
+    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-10', do: '2026-08-20' });
+  });
+
+  it('dzień obecny, ale całkiem pusty, nie rozciąga osi', () => {
+    const dni = [
+      dzien({ date: '2026-08-02' }),
+      dzien({ date: '2026-08-10', totalNetto: 100, workHours: 5 }),
+      dzien({ date: '2026-08-11', workHours: 4 }),
+      dzien({ date: '2026-08-30' }),
+    ];
+    // 10 i 11 to dwa dni, więc do minimum siedmiu dobiera się WSTECZ.
+    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-05', do: '2026-08-11' });
+  });
+
+  it('jeden dzień danych rozciąga się do minimum, WSTECZ', () => {
+    // Jeden słupek na całą szerokość ekranu wygląda jak awaria.
+    const dni = [dzien({ date: '2026-08-20', totalNetto: 100 })];
+    const z = zakresZDanymi(dni, sierpien);
+    expect(z).toEqual({ od: '2026-08-14', do: '2026-08-20' });
+  });
+
+  it('przy początku miesiąca dobiera do przodu, bo wstecz nie ma dokąd', () => {
+    const dni = [dzien({ date: '2026-08-02', totalNetto: 100 })];
+    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-01', do: '2026-08-07' });
+  });
+
+  it('brak jakichkolwiek danych zostawia pełny miesiąc', () => {
+    expect(zakresZDanymi([], sierpien)).toEqual(sierpien);
+  });
+
+  it('dni spoza oglądanego miesiąca nie rozciągają osi', () => {
+    const dni = [
+      dzien({ date: '2026-07-15', totalNetto: 999 }),
+      dzien({ date: '2026-08-10', totalNetto: 100 }),
+      dzien({ date: '2026-08-12', totalNetto: 100 }),
+    ];
+    expect(zakresZDanymi(dni, sierpien).od).toBe('2026-08-06');
+  });
+});
+
+describe('przytnijPuste — puste końce lecą, dziury w środku zostają', () => {
+  const puste = (n: number | null) => n === null;
+
+  it('obcina z obu końców', () => {
+    expect(przytnijPuste([null, null, 1, 2, null], puste)).toEqual([1, 2]);
+  });
+
+  it('dziurę w ŚRODKU zostawia — to informacja, nie brak', () => {
+    expect(przytnijPuste([null, 1, null, 2, null], puste)).toEqual([1, null, 2]);
+  });
+
+  it('same puste dają pustą tablicę, a nie wyjątek', () => {
+    expect(przytnijPuste([null, null], puste)).toEqual([]);
+  });
+
+  it('nic do obcięcia zwraca to samo', () => {
+    expect(przytnijPuste([1, 2, 3], puste)).toEqual([1, 2, 3]);
   });
 });

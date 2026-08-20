@@ -7,6 +7,7 @@ import { KartaWykresu, Legenda, Slupki, type PunktSlupka } from './WykresySvg';
 import {
   histogramStawek,
   ofertyWgGodziny,
+  przytnijPuste,
   podzialDecyzji,
   polozenieKosza,
   type PolozenieKosza,
@@ -24,6 +25,18 @@ import {
  * Sekcja Wykresy ma własny nagłówek z miesiącem i tak jest opisana w karcie.
  */
 
+/**
+ * Podpis godziny: co druga plus zawsze skrajne.
+ *
+ * Po przycięciu osi zostaje najczęściej 10–13 godzin, a nie 24 — przy co
+ * trzeciej wypadałyby cztery podpisy na trzynaście słupków i nie dałoby się
+ * powiedzieć, który słupek to która godzina.
+ */
+function podpisGodziny(godzina: number, i: number, ile: number): string | null {
+  if (i === 0 || i === ile - 1 || i % 2 === 0) return String(godzina);
+  return null;
+}
+
 /** Słowo z `wykresLicz.ts` przełożone na kolor motywu. */
 const KOLOR_KOSZA: Record<PolozenieKosza, string> = {
   nad: C.akcent,
@@ -39,27 +52,38 @@ export function WykresyOfert({
   /** Próg opłacalności z `/api/v1/info`. `null` = nie znamy. */
   minStawka: number | null;
 }) {
-  const kosze = histogramStawek(oferty);
-  const godziny = ofertyWgGodziny(oferty);
+  /**
+   * Puste końce obu osi lecą.
+   *
+   * Oferty przychodzą między 11:00 a 23:00, więc jedenaście pól z lewej to
+   * jedenaście godzin, w których nic nie ma i nie miało prawa być. Tak samo
+   * histogram: kosze od zera do najniższej stawki są zawsze puste.
+   *
+   * Godziny przycinamy RAZ i tym samym zakresem karmimy oba wykresy — dwa
+   * rysunki jeden pod drugim z różnymi osiami przy tych samych podpisach
+   * czytałoby się jako błąd.
+   */
+  const kosze = przytnijPuste(histogramStawek(oferty), (k) => k.ile === 0);
+  const godziny = przytnijPuste(ofertyWgGodziny(oferty), (g) => g.ile === 0);
   const decyzje = podzialDecyzji(oferty);
 
   const histogram: PunktSlupka[] = kosze.map((k, i) => ({
     klucz: `k${i}`,
     // Co drugi podpis — przy koszach po 0,5 zł pełna oś zlewa się w wstęgę.
-    podpis: i % 2 === 0 ? String(k.od) : null,
+    podpis: i === 0 || i === kosze.length - 1 || i % 2 === 0 ? String(k.od) : null,
     wartosc: k.ile,
     kolor: KOLOR_KOSZA[polozenieKosza(k.od, k.do, minStawka)],
   }));
 
-  const ileWgGodziny: PunktSlupka[] = godziny.map((g) => ({
+  const ileWgGodziny: PunktSlupka[] = godziny.map((g, i) => ({
     klucz: `g${g.godzina}`,
-    podpis: g.godzina % 3 === 0 ? String(g.godzina) : null,
+    podpis: podpisGodziny(g.godzina, i, godziny.length),
     wartosc: g.ile,
   }));
 
-  const stawkaWgGodziny: PunktSlupka[] = godziny.map((g) => ({
+  const stawkaWgGodziny: PunktSlupka[] = godziny.map((g, i) => ({
     klucz: `s${g.godzina}`,
-    podpis: g.godzina % 3 === 0 ? String(g.godzina) : null,
+    podpis: podpisGodziny(g.godzina, i, godziny.length),
     wartosc: g.sredniaStawka,
     ...(g.sredniaStawka !== null && minStawka !== null
       ? { kolor: g.sredniaStawka >= minStawka ? C.akcent : C.blad }

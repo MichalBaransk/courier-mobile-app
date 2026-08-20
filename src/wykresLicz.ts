@@ -1,4 +1,5 @@
 import { iloraz, skonczona } from './licz';
+import { przesunDate } from './format';
 import { dniZakresu, dzienTygodnia, type Zakres } from './okresy';
 import type { CourseOfferItem, DailyTotals } from './types';
 
@@ -167,6 +168,84 @@ export function seriaDni(dni: DailyTotals[], zakres: Zakres, ktora: MiaraDnia): 
     const wpis = mapa.get(data);
     return { data, wartosc: wpis === undefined ? null : miara(wpis, ktora) };
   });
+}
+
+/* ========================================================================== */
+/*  Zawężanie zakresu                                                         */
+/* ========================================================================== */
+
+/** Czy tego dnia w ogóle coś się wydarzyło. */
+function costamJest(d: DailyTotals): boolean {
+  return (
+    (skonczona(d.workHours) ?? 0) > 0 ||
+    (skonczona(d.totalNetto) ?? 0) > 0 ||
+    (skonczona(d.grossEarnings) ?? 0) > 0 ||
+    (skonczona(d.distanceKm) ?? 0) > 0 ||
+    (skonczona(d.fuelCost) ?? 0) > 0
+  );
+}
+
+/**
+ * Zakres zawężony do dni, w których cokolwiek jest.
+ *
+ * PO CO. Miesiąc z pięcioma przepracowanymi dniami rozbity na 31 pól to pięć
+ * cienkich kresek przy jednej krawędzi i dwadzieścia sześć pustych pól obok.
+ * Oś udaje wtedy, że wie coś o dniach, o których nie wie nic, a słupki robią
+ * się nieczytelne dokładnie tam, gdzie są dane.
+ *
+ * JEDEN zakres dla wszystkich wykresów dziennych, nie osobny dla każdego.
+ * Gdyby wykres zarobków kończył się 20., a wykres godzin 24., dwa rysunki
+ * jeden pod drugim miałyby różne osie przy tych samych podpisach — i nic by
+ * o tym nie mówiło.
+ *
+ * `minDni` pilnuje dolnej granicy: jeden dzień danych narysowany jako jeden
+ * słupek na całą szerokość ekranu wygląda jak awaria, nie jak wykres.
+ * Dobieranie idzie WSTECZ od ostatniego dnia z danymi — czyli w przeszłość,
+ * która się już wydarzyła, a nie w przyszłość, o której nic nie wiadomo.
+ */
+export function zakresZDanymi(dni: DailyTotals[], pelny: Zakres, minDni = 7): Zakres {
+  const wKalendarzu = new Set(dniZakresu(pelny));
+  const zDanymi = dni
+    .filter((d) => wKalendarzu.has(d.date) && costamJest(d))
+    .map((d) => d.date)
+    .sort();
+
+  const pierwszy = zDanymi[0];
+  const ostatni = zDanymi[zDanymi.length - 1];
+  if (pierwszy === undefined || ostatni === undefined) return pelny;
+
+  let od = pierwszy;
+  const doDaty = ostatni;
+
+  // Dobieramy wstecz, a gdy uderzymy w początek miesiąca — do przodu.
+  while (dniZakresu({ od, do: doDaty }).length < minDni && od > pelny.od) {
+    od = przesunDate(od, -1);
+  }
+  let koniec = doDaty;
+  while (dniZakresu({ od, do: koniec }).length < minDni && koniec < pelny.do) {
+    koniec = przesunDate(koniec, 1);
+  }
+
+  return { od, do: koniec };
+}
+
+/**
+ * Obcięcie pustych pól z OBU KOŃCÓW serii kubełkowej.
+ *
+ * Ta sama myśl, co przy `zakresZDanymi`, tylko dla histogramu stawek i godzin
+ * doby. Oferty przychodzą między 11:00 a 23:00, więc jedenaście pustych pól
+ * z lewej to jedenaście pól, w których nic nie ma i nie miało prawa być.
+ *
+ * Puste pola w ŚRODKU zostają — godzina bez ofert pomiędzy dwiema z ofertami
+ * jest informacją („wtedy nie brałem"), a jej wycięcie skleiłoby oś w coś,
+ * czego nie da się przeczytać.
+ */
+export function przytnijPuste<T>(pola: T[], czyPuste: (p: T) => boolean): T[] {
+  let od = 0;
+  let doIdx = pola.length - 1;
+  while (od <= doIdx && czyPuste(pola[od]!)) od += 1;
+  while (doIdx >= od && czyPuste(pola[doIdx]!)) doIdx -= 1;
+  return od > doIdx ? [] : pola.slice(od, doIdx + 1);
 }
 
 /**

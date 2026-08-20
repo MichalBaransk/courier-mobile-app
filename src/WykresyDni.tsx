@@ -1,11 +1,11 @@
 import { Text, View, StyleSheet } from 'react-native';
 
-import { zl } from './format';
+import { krotkaData, zl } from './format';
 import { dniZakresu, nazwaMiesiaca, type Zakres } from './okresy';
 import { C } from './theme';
 import type { DailyTotals, TargetProgress } from './types';
 import { KartaWykresu, Legenda, LiniaDni, SlupkiDni } from './WykresySvg';
-import { narastajaco, seriaDni, type PunktDnia } from './wykresLicz';
+import { narastajaco, seriaDni, zakresZDanymi, type PunktDnia } from './wykresLicz';
 
 /**
  * Wykresy liczone z dni miesiąca.
@@ -48,15 +48,28 @@ export function WykresyDni({
   cel,
 }: {
   dni: DailyTotals[];
+  /** Pełny miesiąc. Wykresy dzienne zawężają go same do dni z danymi. */
   zakres: Zakres;
   /** Cel miesięczny z `/api/v1/cele`. `null` = nie ustawiony. */
   cel: TargetProgress | null;
 }) {
   const daty = dniZakresu(zakres);
-  const netto = seriaDni(dni, zakres, 'netto');
-  const godzinySeria = seriaDni(dni, zakres, 'godziny');
-  const stawkaSeria = seriaDni(dni, zakres, 'zlH');
-  const suma = narastajaco(netto);
+
+  /**
+   * Oś dzienna kończy się tam, gdzie dane — patrz `zakresZDanymi`.
+   *
+   * WYJĄTEK: wykres narastający zostaje na PEŁNYM miesiącu. Linia tempa
+   * biegnie od zera do całej kwoty celu przez wszystkie dni miesiąca, więc
+   * przycięcie osi zmieniłoby jej nachylenie i „jestem przed tempem" zaczęłoby
+   * znaczyć co innego. Tam puste dni na końcu są informacją: tyle jeszcze
+   * zostało do nadrobienia.
+   */
+  const wezZakres = zakresZDanymi(dni, zakres);
+  const netto = seriaDni(dni, wezZakres, 'netto');
+  const godzinySeria = seriaDni(dni, wezZakres, 'godziny');
+  const stawkaSeria = seriaDni(dni, wezZakres, 'zlH');
+  const suma = narastajaco(seriaDni(dni, zakres, 'netto'));
+  const zawezone = wezZakres.od !== zakres.od || wezZakres.do !== zakres.do;
   const cd = celDzienny(cel, daty.length);
   const celLinia = liniaCelu(daty, cel);
 
@@ -71,6 +84,9 @@ export function WykresyDni({
       <Text style={s.wstep}>
         Wszystko poniżej dotyczy miesiąca {nazwaMiesiaca(zakres.od)} — tego samego, który jest
         ustawiony strzałkami u góry.
+        {zawezone
+          ? ` Oś dzienna pokazuje ${krotkaData(wezZakres.od)}–${krotkaData(wezZakres.do)}, czyli tylko dni, w których coś się działo.`
+          : ''}
       </Text>
 
       <KartaWykresu
