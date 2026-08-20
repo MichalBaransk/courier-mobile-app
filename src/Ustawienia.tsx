@@ -4,7 +4,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 
 import { odczytajAwarie, skasujAwarie, type Awaria } from './awaria';
-import { czyTloDostepne, stanTla, type StanTla } from './gpsTlo';
+import {
+  czyTloDostepne,
+  ostatniOkruszek,
+  skasujOkruszek,
+  stanTla,
+  type StanTla,
+} from './gpsTlo';
 import { C } from './theme';
 import type { Ustawienia } from './ustawienia';
 
@@ -204,20 +210,47 @@ function Diagnostyka({
 }) {
   const [tlo, setTlo] = useState<StanTla | null>(null);
   const [awaria, setAwaria] = useState<Awaria | null>(null);
+  const [okruszek, setOkruszek] = useState<string | null>(null);
+  const [sprawdzam, setSprawdzam] = useState(false);
 
+  /**
+   * ⚠️ OTWARCIE TEGO EKRANU NIE DOTYKA JUŻ MODUŁÓW NATYWNYCH.
+   *
+   * Zgłoszenie z 20.08: „zakończyłem zmianę, wznowiłem, wszedłem w Ustawienia
+   * i mnie wywaliło z aplikacji" — bez żadnego wpisu o awarii, czyli proces
+   * zginął w kodzie natywnym. Podejrzanym jest `stanTla()`, bo tylko ono woła
+   * `expo-task-manager` i `expo-location` przy samym otwarciu ekranu.
+   *
+   * Podejrzanym, nie winnym. Dlatego zamiast zgadywać, ROZDZIELAM te dwie
+   * rzeczy: ekran otwiera się bez ani jednego wywołania natywnego, a stan tła
+   * sprawdza się przyciskiem. Jeśli wywala dalej przy otwarciu — winowajca
+   * jest gdzie indziej. Jeśli dopiero po dotknięciu przycisku — wiadomo
+   * dokładnie, co go zabija, bo okruszek zapisuje nazwę PRZED wywołaniem.
+   *
+   * Przy okazji Ustawienia przestają być ekranem, którego nie da się otworzyć.
+   */
   useEffect(() => {
     if (!widoczny) return;
     let aktualne = true;
-    void stanTla().then((s) => {
-      if (aktualne) setTlo(s);
-    });
+
     void odczytajAwarie().then((a) => {
       if (aktualne) setAwaria(a);
     });
+    void ostatniOkruszek().then((o) => {
+      if (aktualne) setOkruszek(o);
+    });
+
     return () => {
       aktualne = false;
     };
   }, [widoczny]);
+
+  const sprawdzTlo = () => {
+    setSprawdzam(true);
+    void stanTla()
+      .then(setTlo)
+      .finally(() => setSprawdzam(false));
+  };
 
   return (
     <View style={s.stopka}>
@@ -229,8 +262,16 @@ function Diagnostyka({
         </Text>
       </View>
 
+      {okruszek !== null ? (
+        <Text style={s.powod}>
+          Aplikacja zginęła w trakcie: {okruszek}. To wywołanie modułu natywnego —
+          zapisane, zanim padło.
+        </Text>
+      ) : null}
+
       {/* Kolejność wierszy = kolejność sprawdzeń w `uruchomSledzenieTla`.
-          Pierwszy wiersz na „nie" wskazuje ogniwo, na którym się urywa. */}
+          Pierwszy wiersz na „nie" wskazuje ogniwo, na którym się urywa.
+          `—` znaczy „nie pytałem", bo pytanie idzie dopiero z przycisku. */}
       <Tak etykieta="Moduł zadań w tle" wartosc={tlo?.dostepne} />
       <Tak etykieta="Zadanie zdefiniowane" wartosc={tlo?.zdefiniowane} />
       {/* „NIE" w tym wierszu przed pierwszym udanym startem jest POPRAWNE —
@@ -261,6 +302,30 @@ function Diagnostyka({
             <Text style={s.przyciskDiagTekst}>Skasuj zapis awarii</Text>
           </Pressable>
         </View>
+      ) : null}
+
+      <Pressable
+        style={s.przyciskDiag}
+        onPress={sprawdzTlo}
+        disabled={sprawdzam}
+        accessibilityRole="button"
+      >
+        <Text style={s.przyciskDiagTekst}>
+          {sprawdzam ? 'Sprawdzam…' : 'Sprawdź stan śledzenia w tle'}
+        </Text>
+      </Pressable>
+
+      {okruszek !== null ? (
+        <Pressable
+          style={s.przyciskDiag}
+          onPress={() => {
+            void skasujOkruszek();
+            setOkruszek(null);
+          }}
+          accessibilityRole="button"
+        >
+          <Text style={s.przyciskDiagTekst}>Skasuj ślad po awarii</Text>
+        </Pressable>
       ) : null}
 
       <Pressable style={s.przyciskDiag} onPress={onZwolnij} accessibilityRole="button">

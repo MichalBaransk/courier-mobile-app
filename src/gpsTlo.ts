@@ -55,6 +55,57 @@ const KLUCZ_STARTU = 'gps_tlo_start';
  */
 const KLUCZ_POWODU = 'gps_tlo_powod';
 
+/**
+ * Okruszek: NAZWA WYWOŁANIA, KTÓRE WŁAŚNIE TRWA.
+ *
+ * PO CO, skoro jest już `src/awaria.ts`. Bo tamto łapie wyłącznie błędy
+ * JavaScriptu przez `ErrorUtils`. Zgłoszenie z 20.08 — „zakończyłem zmianę,
+ * wznowiłem, wszedłem w Ustawienia i mnie wywaliło" — nie zostawiło ŻADNEGO
+ * wpisu o awarii. To znaczy, że proces zginął w module natywnym, a tam nie
+ * ma czego łapać: nie ma wyjątku po stronie JS, jest ubity proces.
+ *
+ * Okruszek działa inaczej i dlatego działa: zapisujemy nazwę PRZED
+ * wywołaniem, kasujemy PO. Jeśli aplikacja zginie w środku, wpis zostaje
+ * w pamięci trwałej i po ponownym uruchomieniu mówi, które wywołanie ją
+ * zabiło. Zapis przed, nie po — cała wartość siedzi w tej kolejności.
+ */
+const KLUCZ_OKRUSZKA = 'gps_tlo_okruszek';
+
+async function okruszek<T>(nazwa: string, praca: () => Promise<T> | T): Promise<T> {
+  try {
+    await AsyncStorage.setItem(KLUCZ_OKRUSZKA, nazwa);
+  } catch {
+    /* brak okruszka nie może zablokować sprawdzenia */
+  }
+
+  try {
+    return await praca();
+  } finally {
+    try {
+      await AsyncStorage.removeItem(KLUCZ_OKRUSZKA);
+    } catch {
+      /* jw. */
+    }
+  }
+}
+
+/** Nazwa wywołania, w którym aplikacja ostatnio zginęła. `null` = czysto. */
+export async function ostatniOkruszek(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(KLUCZ_OKRUSZKA);
+  } catch {
+    return null;
+  }
+}
+
+export async function skasujOkruszek(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(KLUCZ_OKRUSZKA);
+  } catch {
+    /* nieistotne */
+  }
+}
+
 async function zapiszPowod(powod: string | null): Promise<void> {
   try {
     if (powod === null) await AsyncStorage.removeItem(KLUCZ_POWODU);
@@ -348,25 +399,33 @@ export interface StanTla {
  * się urywa, bez czytania kodu.
  */
 export async function stanTla(): Promise<StanTla> {
-  const dostepne = await czyTloDostepne();
+  const dostepne = await okruszek('TaskManager.isAvailableAsync', czyTloDostepne);
 
   let zdefiniowane = false;
   try {
-    zdefiniowane = dostepne && TaskManager.isTaskDefined(ZADANIE_GPS);
+    zdefiniowane =
+      dostepne && (await okruszek('TaskManager.isTaskDefined', () => TaskManager.isTaskDefined(ZADANIE_GPS)));
   } catch {
     zdefiniowane = false;
   }
 
   let zarejestrowane = false;
   try {
-    zarejestrowane = dostepne && (await TaskManager.isTaskRegisteredAsync(ZADANIE_GPS));
+    zarejestrowane =
+      dostepne &&
+      (await okruszek('TaskManager.isTaskRegisteredAsync', () =>
+        TaskManager.isTaskRegisteredAsync(ZADANIE_GPS)
+      ));
   } catch {
     zarejestrowane = false;
   }
 
   let zgodaTla = false;
   try {
-    zgodaTla = (await Location.getBackgroundPermissionsAsync()).status === 'granted';
+    zgodaTla = await okruszek(
+      'Location.getBackgroundPermissionsAsync',
+      async () => (await Location.getBackgroundPermissionsAsync()).status === 'granted'
+    );
   } catch {
     zgodaTla = false;
   }
@@ -383,7 +442,7 @@ export async function stanTla(): Promise<StanTla> {
     zdefiniowane,
     zarejestrowane,
     zgodaTla,
-    chodzi: await czySledzenieChodzi(),
+    chodzi: await okruszek('Location.hasStartedLocationUpdatesAsync', czySledzenieChodzi),
     powod,
   };
 }
