@@ -226,11 +226,28 @@ export async function uruchomSledzenieTla(wysokaDokladnosc: boolean): Promise<bo
       await zapiszPowod('Brak modułu expo-task-manager w tym APK — potrzebny nowy build.');
       return false;
     }
-    if (!(await TaskManager.isTaskRegisteredAsync(ZADANIE_GPS))) {
-      // Rejestracja siedzi w `gpsTloZadanie.ts`, wciąganym przez `require`
-      // w `try/catch` w `index.ts`. Jeśli tamten `require` padł, start i tak
-      // wywaliłby się na „Task not defined" — lepiej powiedzieć to wprost.
-      await zapiszPowod('Zadanie nie zostało zarejestrowane przy starcie aplikacji.');
+    /**
+     * `isTaskDefined`, NIE `isTaskRegisteredAsync` — to są dwie różne rzeczy
+     * i pomylenie ich zablokowało tło na głucho (P28, zgłoszone z telefonu).
+     *
+     * | funkcja | co sprawdza |
+     * |---|---|
+     * | `isTaskDefined(nazwa)` | czy `defineTask` przeszło w TYM uruchomieniu JS |
+     * | `isTaskRegisteredAsync(nazwa)` | czy zadanie siedzi w TRWAŁYM rejestrze systemu |
+     *
+     * Do trwałego rejestru zadanie trafia dopiero **po pierwszym udanym
+     * `startLocationUpdatesAsync`**. Warunkowanie startu tamtą funkcją to
+     * zakleszczenie: nie wystartuje, bo nie jest zarejestrowane, i nie
+     * zarejestruje się, bo nie wystartowało. Diagnostyka pokazywała wtedy
+     * „Moduł: tak, Zgoda: tak, Zadanie zarejestrowane: NIE" — i tak było
+     * przy KAŻDYM uruchomieniu, na zawsze.
+     *
+     * Sprawdzenie zostaje, bo pilnuje realnego przypadku: gdyby `require`
+     * w `index.ts` padł, `startLocationUpdatesAsync` wywaliłby się na
+     * „Task not defined", a tak dostajemy zdanie po polsku.
+     */
+    if (!TaskManager.isTaskDefined(ZADANIE_GPS)) {
+      await zapiszPowod('Zadanie nie zostało zdefiniowane przy starcie aplikacji.');
       return false;
     }
     if (!(await zapytajOZgodeTla())) {
@@ -279,7 +296,15 @@ export async function uruchomSledzenieTla(wysokaDokladnosc: boolean): Promise<bo
 export interface StanTla {
   /** Czy `expo-task-manager` jest w tym APK. */
   dostepne: boolean;
-  /** Czy `defineTask` przeszło przy starcie aplikacji. */
+  /** Czy `defineTask` przeszło w tym uruchomieniu JS. */
+  zdefiniowane: boolean;
+  /**
+   * Czy zadanie siedzi w trwałym rejestrze systemu.
+   *
+   * `false` przed pierwszym udanym startem — i to jest NORMALNE, nie usterka.
+   * Wiersz jest w diagnostyce tylko dlatego, że pomyliłem go kiedyś
+   * ze `zdefiniowane` i chcę, żeby różnica była widoczna, a nie domyślna.
+   */
   zarejestrowane: boolean;
   /** Zgoda „zawsze" — bez niej Android nie wyda pozycji przy schowanym telefonie. */
   zgodaTla: boolean;
@@ -298,6 +323,13 @@ export interface StanTla {
  */
 export async function stanTla(): Promise<StanTla> {
   const dostepne = await czyTloDostepne();
+
+  let zdefiniowane = false;
+  try {
+    zdefiniowane = dostepne && TaskManager.isTaskDefined(ZADANIE_GPS);
+  } catch {
+    zdefiniowane = false;
+  }
 
   let zarejestrowane = false;
   try {
@@ -320,7 +352,14 @@ export async function stanTla(): Promise<StanTla> {
     powod = null;
   }
 
-  return { dostepne, zarejestrowane, zgodaTla, chodzi: await czySledzenieChodzi(), powod };
+  return {
+    dostepne,
+    zdefiniowane,
+    zarejestrowane,
+    zgodaTla,
+    chodzi: await czySledzenieChodzi(),
+    powod,
+  };
 }
 
 export async function zatrzymajSledzenieTla(): Promise<void> {

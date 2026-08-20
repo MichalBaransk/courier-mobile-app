@@ -229,7 +229,10 @@ function Diagnostyka({
       {/* Kolejność wierszy = kolejność sprawdzeń w `uruchomSledzenieTla`.
           Pierwszy wiersz na „nie" wskazuje ogniwo, na którym się urywa. */}
       <Tak etykieta="Moduł zadań w tle" wartosc={tlo?.dostepne} />
-      <Tak etykieta="Zadanie zarejestrowane" wartosc={tlo?.zarejestrowane} />
+      <Tak etykieta="Zadanie zdefiniowane" wartosc={tlo?.zdefiniowane} />
+      {/* „NIE" w tym wierszu przed pierwszym udanym startem jest POPRAWNE —
+          do trwałego rejestru systemu zadanie trafia dopiero po nim. */}
+      <Tak etykieta="W rejestrze systemu" wartosc={tlo?.zarejestrowane} />
       <Tak etykieta={'Zgoda „zawsze"'} wartosc={tlo?.zgodaTla} />
       <Tak etykieta="Śledzenie w tle chodzi" wartosc={tlo?.chodzi} />
 
