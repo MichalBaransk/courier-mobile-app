@@ -1,5 +1,4 @@
 import { iloraz, skonczona } from './licz';
-import { przesunDate } from './format';
 import { dniZakresu, dzienTygodnia, type Zakres } from './okresy';
 import type { CourseOfferItem, DailyTotals } from './types';
 
@@ -198,12 +197,15 @@ function costamJest(d: DailyTotals): boolean {
  * jeden pod drugim miałyby różne osie przy tych samych podpisach — i nic by
  * o tym nie mówiło.
  *
- * `minDni` pilnuje dolnej granicy: jeden dzień danych narysowany jako jeden
- * słupek na całą szerokość ekranu wygląda jak awaria, nie jak wykres.
- * Dobieranie idzie WSTECZ od ostatniego dnia z danymi — czyli w przeszłość,
- * która się już wydarzyła, a nie w przyszłość, o której nic nie wiadomo.
+ * ŻADNEGO DOBIERANIA DO MINIMUM. Pierwsza wersja rozciągała krótki zakres do
+ * siedmiu dni, żeby jeden dzień danych nie wyszedł jako słupek na całą
+ * szerokość ekranu. To było naprawianie problemu RYSOWANIA przez zmyślanie
+ * dni: oś pokazywała sześć pól, o których nie wiadomo nic, tylko po to, żeby
+ * siódme dobrze wyglądało. Szerokość słupka ogranicza teraz `Slupki`
+ * (`MAKS_SLUPEK`), a oś mówi wyłącznie prawdę — jeden dzień danych to jeden
+ * dzień na osi.
  */
-export function zakresZDanymi(dni: DailyTotals[], pelny: Zakres, minDni = 7): Zakres {
+export function zakresZDanymi(dni: DailyTotals[], pelny: Zakres): Zakres {
   const wKalendarzu = new Set(dniZakresu(pelny));
   const zDanymi = dni
     .filter((d) => wKalendarzu.has(d.date) && costamJest(d))
@@ -214,19 +216,7 @@ export function zakresZDanymi(dni: DailyTotals[], pelny: Zakres, minDni = 7): Za
   const ostatni = zDanymi[zDanymi.length - 1];
   if (pierwszy === undefined || ostatni === undefined) return pelny;
 
-  let od = pierwszy;
-  const doDaty = ostatni;
-
-  // Dobieramy wstecz, a gdy uderzymy w początek miesiąca — do przodu.
-  while (dniZakresu({ od, do: doDaty }).length < minDni && od > pelny.od) {
-    od = przesunDate(od, -1);
-  }
-  let koniec = doDaty;
-  while (dniZakresu({ od, do: koniec }).length < minDni && koniec < pelny.do) {
-    koniec = przesunDate(koniec, 1);
-  }
-
-  return { od, do: koniec };
+  return { od: pierwszy, do: ostatni };
 }
 
 /**
@@ -274,13 +264,27 @@ export function narastajaco(seria: PunktDnia[]): PunktDnia[] {
  * ostatnia stoi bliżej niż `minOdstep` od poprzedniego podpisu, to poprzedni
  * ustępuje. Koniec zakresu jest ważniejszy niż równy rytm: „31" mówi, że
  * miesiąc się skończył, „30" nie mówi nic, czego nie widać obok.
+ *
+ * `co` DOBIERA SIĘ SAMO do długości serii, celując w mniej więcej siedem
+ * podpisów. Sztywna piątka była dobra dla miesiąca i bezużyteczna dla trzech
+ * dni — od kiedy oś zawęża się do dni z danymi (`zakresZDanymi`), krótkie
+ * serie są normą, nie wyjątkiem. Przy siedmiu polach i mniej podpisany jest
+ * każdy słupek.
  */
-export function ktoreEtykiety(ile: number, co = 5, minOdstep = 3): Set<number> {
+export function ktoreEtykiety(
+  ile: number,
+  co = Math.max(1, Math.ceil(ile / 7)),
+  minOdstep = co
+): Set<number> {
   if (ile <= 0) return new Set();
 
   const wybrane: number[] = [];
   for (let i = 0; i < ile; i++) {
-    if (i === 0 || (i + 1) % co === 0) wybrane.push(i);
+    // Rytm liczony OD PIERWSZEJ pozycji, nie od ostatniej. Wariant
+    // `(i + 1) % co` przy `co = 2` dawał podpisy pod polem 0 i 1 naraz —
+    // dwie liczby obok siebie, czyli dokładnie to, czemu ta funkcja
+    // ma zapobiegać.
+    if (i % co === 0) wybrane.push(i);
   }
 
   const ostatni = ile - 1;

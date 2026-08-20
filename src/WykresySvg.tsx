@@ -52,6 +52,17 @@ const GORNY = 8;
  */
 const PRAWY = 12;
 
+/**
+ * Górna granica szerokości słupka.
+ *
+ * Przy jednym albo dwóch dniach danych pole serii ma pół ekranu, a słupek
+ * wypełniający je w całości przestaje wyglądać jak słupek. Ograniczenie
+ * szerokości rozwiązuje to TUTAJ, w rysowaniu — wcześniej rozwiązywałem to
+ * dorzucaniem do osi dni, o których nie wiadomo nic, tylko po to, żeby pola
+ * były węższe. Oś ma mówić, ile jest danych; wygląd to sprawa rysownika.
+ */
+const MAKS_SLUPEK = 30;
+
 /** Szerokość jednego pola serii. Jedno miejsce, bo liczą to trzy komponenty. */
 function krokOsi(szerokosc: number, ile: number): number {
   return (szerokosc - LEWY - PRAWY) / Math.max(1, ile);
@@ -204,9 +215,9 @@ export function Slupki({
   const szerokosc = useSzerokosc();
   const os = zakresOsi([...seria.map((p) => p.wartosc), odniesienie?.wartosc ?? null]);
   const krok = krokOsi(szerokosc, seria.length);
-  // Zawsze zostaje szczelina między słupkami, ale przy 31 dniach słupek nie
-  // może zejść poniżej 1 px, bo znika.
-  const szerSlupka = Math.max(1, krok * 0.68);
+  // Szczelina zostaje zawsze, ale przy 31 dniach słupek nie może zejść poniżej
+  // 1 px (znika), a przy jednym dniu nie może urosnąć w blok na pół ekranu.
+  const szerSlupka = Math.min(MAKS_SLUPEK, Math.max(1, krok * 0.68));
 
   return (
     <Svg width={szerokosc} height={GORNY + WYS + DOLNY}>

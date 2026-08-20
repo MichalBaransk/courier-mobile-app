@@ -366,16 +366,24 @@ describe('ktoreEtykiety — podpisy osi się nie zlewają', () => {
     }
   });
 
-  it('przy 30 dniach ostatni podpis wypada równo i nic nie ustępuje', () => {
-    const e = ktoreEtykiety(30);
-    expect([...e].sort((a, b) => a - b)).toEqual([0, 4, 9, 14, 19, 24, 29]);
+  it('rytm liczy się od pierwszej pozycji', () => {
+    expect([...ktoreEtykiety(31)].sort((a, b) => a - b)).toEqual([0, 5, 10, 15, 20, 25, 30]);
   });
 
-  it('żadne dwa podpisy nie stoją bliżej niż minimalny odstęp', () => {
-    for (const ile of [1, 2, 3, 7, 28, 29, 30, 31]) {
+  it('krótka seria dostaje podpis pod KAŻDYM słupkiem', () => {
+    // Od kiedy oś zawęża się do dni z danymi, trzy dni to normalny przypadek.
+    // Sztywne „co piąty" podpisywało wtedy jeden słupek na trzy.
+    for (const ile of [1, 2, 3, 5, 7]) {
+      expect(ktoreEtykiety(ile).size).toBe(ile);
+    }
+  });
+
+  it('długa seria nie zlewa podpisów i nie robi ich więcej niż dziewięć', () => {
+    for (const ile of [12, 20, 28, 29, 30, 31]) {
       const kolejne = [...ktoreEtykiety(ile)].sort((a, b) => a - b);
+      expect(kolejne.length).toBeLessThanOrEqual(9);
       for (let i = 1; i < kolejne.length; i++) {
-        expect(kolejne[i]! - kolejne[i - 1]!).toBeGreaterThanOrEqual(3);
+        expect(kolejne[i]! - kolejne[i - 1]!).toBeGreaterThanOrEqual(2);
       }
     }
   });
@@ -403,20 +411,22 @@ describe('zakresZDanymi — oś kończy się tam, gdzie dane', () => {
       dzien({ date: '2026-08-11', workHours: 4 }),
       dzien({ date: '2026-08-30' }),
     ];
-    // 10 i 11 to dwa dni, więc do minimum siedmiu dobiera się WSTECZ.
-    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-05', do: '2026-08-11' });
+    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-10', do: '2026-08-11' });
   });
 
-  it('jeden dzień danych rozciąga się do minimum, WSTECZ', () => {
-    // Jeden słupek na całą szerokość ekranu wygląda jak awaria.
+  it('jeden dzień danych to JEDEN dzień na osi — nic się nie dobiera', () => {
+    // Dorzucanie pustych dni, żeby słupek był węższy, to zmyślanie danych
+    // w celu poprawienia wyglądu. Szerokość słupka ogranicza rysownik.
     const dni = [dzien({ date: '2026-08-20', totalNetto: 100 })];
-    const z = zakresZDanymi(dni, sierpien);
-    expect(z).toEqual({ od: '2026-08-14', do: '2026-08-20' });
+    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-20', do: '2026-08-20' });
   });
 
-  it('przy początku miesiąca dobiera do przodu, bo wstecz nie ma dokąd', () => {
-    const dni = [dzien({ date: '2026-08-02', totalNetto: 100 })];
-    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-01', do: '2026-08-07' });
+  it('dwa dni obok siebie to dwa dni, nie tydzień', () => {
+    const dni = [
+      dzien({ date: '2026-08-02', totalNetto: 100 }),
+      dzien({ date: '2026-08-03', totalNetto: 100 }),
+    ];
+    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-02', do: '2026-08-03' });
   });
 
   it('brak jakichkolwiek danych zostawia pełny miesiąc', () => {
@@ -429,7 +439,7 @@ describe('zakresZDanymi — oś kończy się tam, gdzie dane', () => {
       dzien({ date: '2026-08-10', totalNetto: 100 }),
       dzien({ date: '2026-08-12', totalNetto: 100 }),
     ];
-    expect(zakresZDanymi(dni, sierpien).od).toBe('2026-08-06');
+    expect(zakresZDanymi(dni, sierpien)).toEqual({ od: '2026-08-10', do: '2026-08-12' });
   });
 });
 

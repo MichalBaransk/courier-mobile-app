@@ -6,6 +6,7 @@ import type { CourseOfferItem } from './types';
 import { KartaWykresu, Legenda, Slupki, type PunktSlupka } from './WykresySvg';
 import {
   histogramStawek,
+  ktoreEtykiety,
   ofertyWgGodziny,
   przytnijPuste,
   podzialDecyzji,
@@ -24,18 +25,6 @@ import {
  * jednego dnia to kilkanaście słupków po jednym — wykres, który nic nie mówi.
  * Sekcja Wykresy ma własny nagłówek z miesiącem i tak jest opisana w karcie.
  */
-
-/**
- * Podpis godziny: co druga plus zawsze skrajne.
- *
- * Po przycięciu osi zostaje najczęściej 10–13 godzin, a nie 24 — przy co
- * trzeciej wypadałyby cztery podpisy na trzynaście słupków i nie dałoby się
- * powiedzieć, który słupek to która godzina.
- */
-function podpisGodziny(godzina: number, i: number, ile: number): string | null {
-  if (i === 0 || i === ile - 1 || i % 2 === 0) return String(godzina);
-  return null;
-}
 
 /** Słowo z `wykresLicz.ts` przełożone na kolor motywu. */
 const KOLOR_KOSZA: Record<PolozenieKosza, string> = {
@@ -65,25 +54,29 @@ export function WykresyOfert({
    */
   const kosze = przytnijPuste(histogramStawek(oferty), (k) => k.ile === 0);
   const godziny = przytnijPuste(ofertyWgGodziny(oferty), (g) => g.ile === 0);
+
+  // Te same reguły podpisów co na osi dziennej — po przycięciu obie osie mają
+  // podobną długość, a dwie ręcznie pisane reguły to dwa miejsca na ten sam błąd.
+  const etykietyGodzin = ktoreEtykiety(godziny.length);
+  const etykietyKoszy = ktoreEtykiety(kosze.length);
   const decyzje = podzialDecyzji(oferty);
 
   const histogram: PunktSlupka[] = kosze.map((k, i) => ({
     klucz: `k${i}`,
-    // Co drugi podpis — przy koszach po 0,5 zł pełna oś zlewa się w wstęgę.
-    podpis: i === 0 || i === kosze.length - 1 || i % 2 === 0 ? String(k.od) : null,
+    podpis: etykietyKoszy.has(i) ? String(k.od) : null,
     wartosc: k.ile,
     kolor: KOLOR_KOSZA[polozenieKosza(k.od, k.do, minStawka)],
   }));
 
   const ileWgGodziny: PunktSlupka[] = godziny.map((g, i) => ({
     klucz: `g${g.godzina}`,
-    podpis: podpisGodziny(g.godzina, i, godziny.length),
+    podpis: etykietyGodzin.has(i) ? String(g.godzina) : null,
     wartosc: g.ile,
   }));
 
   const stawkaWgGodziny: PunktSlupka[] = godziny.map((g, i) => ({
     klucz: `s${g.godzina}`,
-    podpis: podpisGodziny(g.godzina, i, godziny.length),
+    podpis: etykietyGodzin.has(i) ? String(g.godzina) : null,
     wartosc: g.sredniaStawka,
     ...(g.sredniaStawka !== null && minStawka !== null
       ? { kolor: g.sredniaStawka >= minStawka ? C.akcent : C.blad }

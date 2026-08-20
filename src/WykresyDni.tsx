@@ -85,7 +85,7 @@ export function WykresyDni({
         Wszystko poniżej dotyczy miesiąca {nazwaMiesiaca(zakres.od)} — tego samego, który jest
         ustawiony strzałkami u góry.
         {zawezone
-          ? ` Oś dzienna pokazuje ${krotkaData(wezZakres.od)}–${krotkaData(wezZakres.do)}, czyli tylko dni, w których coś się działo.`
+          ? ` Oś dzienna pokazuje ${krotkaData(wezZakres.od)}–${krotkaData(wezZakres.do)} — tylko dni, w których coś się działo, bez ani jednego pustego pola z boku.`
           : ''}
       </Text>
 
