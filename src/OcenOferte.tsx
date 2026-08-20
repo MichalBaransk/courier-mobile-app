@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -12,7 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { ApiError, postDecyzjaOferty, postOferte, type PozycjaOceny } from './api';
 import { km, stawka, zl } from './format';
-import { kluczObrazu, typObrazu } from './obraz';
+import { haszObrazu, kluczOceny, typObrazu } from './obraz';
 import { biezacaPozycja } from './lokalizacja';
 import { C } from './theme';
 import type { WynikOceny } from './types';
@@ -52,9 +52,21 @@ const JAKOSC = 1;
 interface WybranyObraz {
   base64: string;
   typ: ReturnType<typeof typObrazu>;
-  /** Klucz idempotencji — ten sam przy każdym ponowieniu tego zrzutu. */
+  /**
+   * Klucz idempotencji tego JEDNEGO wyboru zdjęcia. Przycisk „Ponów" wysyła
+   * ten sam klucz, więc ponowienie po timeoucie nie kupuje drugiego odczytu.
+   * Nowy wybór z galerii dostaje nowy klucz — powód w `obraz.ts`.
+   */
   klucz: string;
+  /** Hasz treści — tylko po to, żeby rozpoznać powtórnie wysłany zrzut. */
+  hasz: string;
 }
+
+/** `HH:MM` z lokalnego zegara. Bez `Intl` — jedno miejsce, dwie liczby. */
+const godzinaTeraz = (): string => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
 
 type Stan =
   | { faza: 'wybor' }
@@ -81,17 +93,30 @@ export function OcenOferte({
    * kluczem idempotencji i nie kupiło drugiego odczytu.
    */
   const [obraz, setObraz] = useState<WybranyObraz | null>(null);
+  /** Komunikat informacyjny (powtórka zrzutu) — to nie jest błąd i nie ma być czerwony. */
+  const [uwaga, setUwaga] = useState<string | null>(null);
+  /**
+   * Zrzuty ocenione w tym uruchomieniu aplikacji: hasz treści → godzina oceny.
+   *
+   * Zwykły `useRef`, nie stan i nie dysk. Ta pamięć ma tylko ostrzec, że ten sam
+   * zrzut idzie drugi raz; po restarcie aplikacji ostrzeżenie przepada i nic
+   * złego się nie dzieje — ocena i tak jest dozwolona. Trzymanie tego w bazie
+   * albo w `AsyncStorage` byłoby infrastrukturą pod komunikat.
+   */
+  const ocenione = useRef<Map<string, string>>(new Map());
 
   const zamknij = () => {
     if (stan.faza === 'ocenianie') return;
     setStan({ faza: 'wybor' });
     setBlad(null);
+    setUwaga(null);
     setObraz(null);
     onZamknij();
   };
 
   const ocen = async (zAparatu: boolean) => {
     setBlad(null);
+    setUwaga(null);
 
     const zgoda = zAparatu
       ? await ImagePicker.requestCameraPermissionsAsync()
@@ -125,12 +150,30 @@ export function OcenOferte({
       return;
     }
 
+    const hasz = haszObrazu(zdjecie.base64);
     const wybrany: WybranyObraz = {
       base64: zdjecie.base64,
       // Typ z BAJTÓW, nie z `asset.mimeType` — powód w nagłówku `obraz.ts`.
       typ: typObrazu(zdjecie.base64),
-      klucz: kluczObrazu(zdjecie.base64),
+      klucz: kluczOceny(),
+      hasz,
     };
+
+    /**
+     * Powtórka jest OSTRZEŻENIEM, nie blokadą.
+     *
+     * Wcześniej ten sam zrzut po prostu nie tworzył nowego wpisu — serwer
+     * odbijał go jako powtórkę klucza i kurier nie miał jak się o tym dowiedzieć.
+     * Teraz ocena się odbywa, ale ekran mówi wprost, że to ten sam obraz.
+     */
+    const kiedy = ocenione.current.get(hasz);
+    if (kiedy !== undefined) {
+      setUwaga(
+        `🔁 To ten sam zrzut, który oceniałeś o ${kiedy}. Oceniam go ponownie — ` +
+          'powstanie nowy wpis w ofertach.'
+      );
+    }
+
     setObraz(wybrany);
     await wyslij(wybrany);
   };
@@ -161,6 +204,7 @@ export function OcenOferte({
 
     try {
       const wynik = await postOferte(token, wybrany.base64, wybrany.typ, pozycja, wybrany.klucz);
+      ocenione.current.set(wybrany.hasz, godzinaTeraz());
       setStan({ faza: 'wynik', wynik, decyzja: null });
       onOceniono();
     } catch (err) {
@@ -172,16 +216,17 @@ export function OcenOferte({
        * Serwer pracuje dalej — czyta zrzut i zapisuje ofertę — a zerwane
        * połączenie widzi tylko telefon. Napisanie „nie udało się" byłoby
        * nieprawdą i kazałoby ocenić ofertę drugi raz. Dlatego mówimy wprost,
-       * co mogło się stać, i przypominamy, że ponowienie jest darmowe:
-       * idzie z tym samym kluczem, więc serwer odda zapamiętaną odpowiedź
-       * zamiast pytać model ponownie.
+       * co mogło się stać, i kierujemy do przycisku „Ponów ostatni zrzut" —
+       * TYLKO on idzie z tym samym kluczem idempotencji, więc tylko on nie
+       * utworzy drugiego wpisu. Ponowny wybór z galerii to nowa ocena
+       * (powód w `obraz.ts`).
        */
       const zaDlugo = err instanceof ApiError && err.message.includes('na czas');
       setBlad(
         zaDlugo
           ? 'Serwer nie zdążył odpowiedzieć, ale prawdopodobnie DOKOŃCZYŁ ocenę — ' +
-              'sprawdź listę ofert niżej. Ponowienie tego samego zrzutu jest bezpieczne: ' +
-              'nie utworzy drugiego wpisu.'
+              'sprawdź listę ofert niżej. Jeśli chcesz spróbować jeszcze raz, użyj ' +
+              '„Ponów ostatni zrzut" — to jedyna droga, która nie utworzy drugiego wpisu.'
           : err instanceof ApiError
             ? err.message
             : 'Nie udało się ocenić oferty. Spróbuj jeszcze raz.'
@@ -210,6 +255,7 @@ export function OcenOferte({
           <Text style={s.tytul}>Oceń ofertę</Text>
 
           {blad ? <Text style={s.blad}>{blad}</Text> : null}
+          {uwaga ? <Text style={s.uwaga}>{uwaga}</Text> : null}
 
           {stan.faza === 'wybor' ? (
             <>
@@ -373,6 +419,7 @@ const s = StyleSheet.create({
   tytul: { color: C.tekst, fontSize: 22, fontWeight: '700' },
   podtytul: { color: C.tekstPrzygaszony, fontSize: 13, lineHeight: 18 },
   blad: { color: C.blad, fontSize: 13, lineHeight: 18 },
+  uwaga: { color: C.ostrzezenie, fontSize: 13, lineHeight: 18 },
   przypis: { color: C.tekstPrzygaszony, fontSize: 12, lineHeight: 17 },
 
   przycisk: {

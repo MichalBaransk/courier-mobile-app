@@ -31,33 +31,57 @@ export function typObrazu(base64: string): TypObrazu {
 }
 
 /**
- * Klucz idempotencji wyliczony Z TRESCI OBRAZU.
+ * Klucz idempotencji dla JEDNEGO wybrania zdjecia.
  *
- * Po co. Ocena oferty to jedyny zapis w tej aplikacji, ktory kosztuje —
- * po drugiej stronie jest wywolanie modelu. Gdy zadanie utknie i uzytkownik
- * sprobuje ponownie z TYM SAMYM zrzutem, bez klucza powstaje drugi wiersz
- * w `course_offers` i druga oplata za odczyt. Z kluczem serwer rozpoznaje
- * powtorke i oddaje zapamietana odpowiedz, nie pytajac modelu drugi raz
- * (`api/idempotency.ts` po stronie bota).
+ * Po co idempotencja w ogole. Ocena oferty to jedyny zapis w tej aplikacji,
+ * ktory kosztuje — po drugiej stronie jest wywolanie modelu. Gdy zadanie
+ * utknie i uzytkownik sprobuje ponownie, bez klucza powstaje drugi wiersz
+ * w `course_offers` i druga oplata za odczyt.
  *
- * Klucz musi byc DETERMINISTYCZNY, bo ponowienie to nowe wybranie tego samego
- * zdjecia z galerii — losowy identyfikator nic by tu nie dal. Stad hasz
- * z samej tresci: ten sam zrzut zawsze daje ten sam klucz.
+ * DLACZEGO NIE HASZ TRESCI — to byla pierwsza wersja i byla bledna.
+ * Klucz liczony z bajtow obrazu (`kluczObrazu` nizej) sklejal w jedno
+ * WSZYSTKIE oceny tego samego zrzutu przez 48 h (`RETENCJA_H` po stronie
+ * serwera). W logu z 20.08 widac to wprost: piec zadan z aplikacji, z czego
+ * trzy odbite jako „powtorka" bez wywolania modelu i bez zapisu. Kurier
+ * widzial werdykt, a lista ofert sie nie zmieniala — bo nowego wiersza
+ * nie bylo. Ponowna ocena tego samego zrzutu jest swiadoma i ma dac
+ * nowy wpis.
+ *
+ * Zakres ochrony po zmianie: JEDNO wybranie zdjecia. Przycisk „Ponow ostatni
+ * zrzut" wysyla zapamietany obraz z TYM SAMYM kluczem, wiec ponowienie po
+ * timeoucie nadal nie kupuje drugiego odczytu. Nowy wybor z galerii to nowy
+ * klucz i nowa ocena.
+ *
+ * Format pilnuje ograniczen serwera (`normalizujKlucz`): 8–128 znakow
+ * ze zbioru `[A-Za-z0-9._:-]`.
+ */
+let licznikOcen = 0;
+
+export function kluczOceny(): string {
+  licznikOcen += 1;
+  const losowe = Math.random().toString(36).slice(2, 10);
+  return `ocena-${Date.now().toString(36)}-${licznikOcen.toString(36)}-${losowe}`;
+}
+
+/**
+ * Hasz TRESCI obrazu — dzis wylacznie do rozpoznania powtorki.
+ *
+ * Przestal byc kluczem idempotencji (powod wyzej), ale sama liczba dalej jest
+ * przydatna: pozwala powiedziec kurierowi „to ten sam zrzut, ktory juz
+ * oceniales", zamiast po cichu policzyc go drugi raz. Ocena i tak sie odbywa —
+ * to komunikat, nie blokada.
  *
  * FNV-1a, 32 bity, liczony po co 7. znaku. To NIE jest funkcja
  * kryptograficzna i nie musi nia byc — chodzi wylacznie o to, zeby dwa rozne
- * zrzuty prawie na pewno mialy rozne klucze. Pelny przebieg po dwumegowym
- * stringu na telefonie to zbedna praca; probkowanie plus dlugosc w kluczu
+ * zrzuty prawie na pewno mialy rozne wyniki. Pelny przebieg po dwumegowym
+ * stringu na telefonie to zbedna praca; probkowanie plus dlugosc w wyniku
  * daje w praktyce to samo.
- *
- * Format wyniku pilnuje ograniczen serwera (`normalizujKlucz`): 8–128 znakow
- * ze zbioru `[A-Za-z0-9._:-]`.
  */
-export function kluczObrazu(base64: string): string {
+export function haszObrazu(base64: string): string {
   let hasz = 0x811c9dc5;
   for (let i = 0; i < base64.length; i += 7) {
     hasz ^= base64.charCodeAt(i);
     hasz = Math.imul(hasz, 0x01000193) >>> 0;
   }
-  return `oferta-${base64.length.toString(36)}-${hasz.toString(36)}`;
+  return `${base64.length.toString(36)}-${hasz.toString(36)}`;
 }

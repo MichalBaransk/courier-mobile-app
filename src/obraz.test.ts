@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { kluczObrazu, typObrazu } from './obraz';
+import { haszObrazu, kluczOceny, typObrazu } from './obraz';
 
 /**
  * Sygnatury liczone z prawdziwych bajtow, nie przepisane z pamieci:
@@ -30,28 +30,44 @@ describe('typObrazu — format z bajtów, nie z deklaracji pickera', () => {
   });
 });
 
-describe('kluczObrazu — idempotencja oceny oferty', () => {
-  it('ten sam obraz daje ten sam klucz — na tym polega ponowienie', () => {
-    expect(kluczObrazu(JPEG)).toBe(kluczObrazu(JPEG));
+describe('haszObrazu — rozpoznanie powtórnie wysłanego zrzutu', () => {
+  it('ten sam obraz daje ten sam hasz — na tym polega ostrzeżenie o powtórce', () => {
+    expect(haszObrazu(JPEG)).toBe(haszObrazu(JPEG));
   });
 
-  it('różne obrazy dają różne klucze', () => {
-    expect(kluczObrazu(JPEG)).not.toBe(kluczObrazu(PNG));
+  it('różne obrazy dają różne hasze', () => {
+    expect(haszObrazu(JPEG)).not.toBe(haszObrazu(PNG));
+  });
+
+  it('zmiana JEDNEGO próbkowanego znaku zmienia hasz', () => {
+    const a = 'B'.repeat(100);
+    const b = `${'B'.repeat(70)}C${'B'.repeat(29)}`;
+    expect(a.length).toBe(b.length);
+    expect(haszObrazu(a)).not.toBe(haszObrazu(b));
+  });
+});
+
+describe('kluczOceny — idempotencja JEDNEGO wyboru zdjęcia', () => {
+  /**
+   * To jest test regresji, nie ozdoba. Poprzednia wersja liczyła klucz z treści
+   * obrazu i przez to serwer odbijał każdą kolejną ocenę tego samego zrzutu
+   * przez 48 h jako powtórkę — bez wywołania modelu i bez wpisu w `course_offers`.
+   */
+  it('dwa wywołania dają RÓŻNE klucze — powtórna ocena ma dać nowy wpis', () => {
+    expect(kluczOceny()).not.toBe(kluczOceny());
+  });
+
+  it('sto wywołań pod rząd to sto różnych kluczy', () => {
+    const klucze = new Set(Array.from({ length: 100 }, () => kluczOceny()));
+    expect(klucze.size).toBe(100);
   });
 
   it('mieści się w ograniczeniach serwera: 8–128 znaków z dozwolonego zbioru', () => {
-    for (const wejscie of [JPEG, PNG, 'A'.repeat(3_000_000), 'x']) {
-      const k = kluczObrazu(wejscie);
+    for (let i = 0; i < 50; i++) {
+      const k = kluczOceny();
       expect(k.length).toBeGreaterThanOrEqual(8);
       expect(k.length).toBeLessThanOrEqual(128);
       expect(/^[A-Za-z0-9._:-]+$/.test(k)).toBe(true);
     }
-  });
-
-  it('zmiana JEDNEGO próbkowanego znaku zmienia klucz', () => {
-    const a = 'B'.repeat(100);
-    const b = `${'B'.repeat(70)}C${'B'.repeat(29)}`;
-    expect(a.length).toBe(b.length);
-    expect(kluczObrazu(a)).not.toBe(kluczObrazu(b));
   });
 });
