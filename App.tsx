@@ -72,6 +72,7 @@ import { PanelUstawien } from './src/Ustawienia';
 import { DOMYSLNE as USTAWIENIA_DOMYSLNE, type Ustawienia } from './src/ustawienia';
 import { wczytajUstawienia, zapiszUstawienia } from './src/ustawieniaMagazyn';
 import { KalendarzMiesiaca } from './src/Wykresy';
+import { WykresyDni } from './src/WykresyDni';
 import { C } from './src/theme';
 import type {
   ApiInfo,
@@ -1248,6 +1249,15 @@ function Aplikacja() {
           </>
         ) : null}
 
+        {/* ================= WYKRESY ============================================= */}
+        {sekcja === 'wykresy' && miesiac !== null ? (
+          <WykresyDni
+            dni={dniMiesiaca}
+            zakres={zakresMiesiaca(miesiac)}
+            cel={cele?.miesiac ?? null}
+          />
+        ) : null}
+
         {/* ================= PORTFEL ============================================= */}
         {sekcja === 'portfel' ? (
           <>
@@ -1295,6 +1305,10 @@ function Aplikacja() {
         onPortfel={() => {
           setPanelUstawien(false);
           setSekcja('portfel');
+        }}
+        onWykresy={() => {
+          setPanelUstawien(false);
+          setSekcja('wykresy');
         }}
         blokadaEkranu={blokadaEkranu}
         onZwolnijBlokade={() => {

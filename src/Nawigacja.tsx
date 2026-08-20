@@ -16,7 +16,13 @@ import { C } from './theme';
  * obok. Przyczyny nie ustaliłem — więc ich nie łączę.
  */
 
-export type Sekcja = 'kalendarz' | 'oferty' | 'cele' | 'portfel';
+/**
+ * `portfel` i `wykresy` NIE MAJĄ przycisku na pasku — wchodzi się do nich
+ * z panelu „Więcej". Są jednak pełnoprawnymi sekcjami: mają własny nagłówek
+ * i zajmują cały ekran, a nie okno na wierzchu. Ta sama maszyna stanu,
+ * inne wejście.
+ */
+export type Sekcja = 'kalendarz' | 'oferty' | 'cele' | 'portfel' | 'wykresy';
 
 /**
  * Na pasku są TRZY sekcje, nie cztery.

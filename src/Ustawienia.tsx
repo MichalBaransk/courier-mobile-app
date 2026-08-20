@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
@@ -6,18 +7,31 @@ import { C } from './theme';
 import type { Ustawienia } from './ustawienia';
 
 /**
- * Panel ustawień — piąta pozycja dolnego paska („Więcej").
+ * Panel „Więcej" — piąta pozycja dolnego paska.
  *
  * DLACZEGO NIE SZUFLADA Z HAMBURGEREM. Prawy górny róg to najtrudniej
  * osiągalny punkt ekranu przy obsłudze jedną ręką, a ta aplikacja bywa
  * używana w rękawicy, przy motocyklu. Dolny pasek jest w zasięgu kciuka
- * z definicji — dlatego tam jest. Piąta pozycja nie powiela też czterech
- * sekcji, więc nie powstają dwie drogi do tego samego miejsca.
+ * z definicji — dlatego tam jest. Piąta pozycja nie powiela też sekcji
+ * z paska, więc nie powstają dwie drogi do tego samego miejsca.
+ *
+ * OD 20.08 TO JEST MENU, NIE EKRAN USTAWIEŃ. Wcześniej panel mieszał wejście
+ * do Portfela z trzema przełącznikami i diagnostyką — dopóki pozycji było
+ * cztery, uchodziło to płazem. Przy dokładanych wykresach lista zrobiłaby się
+ * na tyle długa, że przełącznik GPS-a i wejście do wykresów wyglądałyby jak
+ * rzeczy tego samego rodzaju, a nie są. Teraz menu ma trzy wejścia,
+ * a przełączniki mają własny podekran.
+ *
+ * PODEKRAN, NIE DRUGI `Modal`. Modal na modalu na Androidzie potrafi mrugnąć
+ * przy animacji i gubi przycisk „wstecz". Jeden stan `podekran` w tym samym
+ * oknie kosztuje jedno `useState` i nie ma tych wad.
  *
  * `Modal` z rdzenia React Native, bez `@react-navigation` — ten sam powód
  * co w `Nawigacja.tsx`: tamto ciągnie `react-native-screens`, czyli kolejny
  * moduł natywny i całą warstwę nawigacji, której tu nie ma po co mieć.
  */
+
+type Podekran = 'menu' | 'ustawienia';
 
 export function PanelUstawien({
   widoczny,
@@ -25,6 +39,7 @@ export function PanelUstawien({
   onZmien,
   onZamknij,
   onPortfel,
+  onWykresy,
   blokadaEkranu,
   onZwolnijBlokade,
 }: {
@@ -34,11 +49,27 @@ export function PanelUstawien({
   onZamknij: () => void;
   /** Portfel zszedł z dolnego paska w kroku 30 — wejście jest tutaj. */
   onPortfel: () => void;
+  /** Wykresy są sekcją jak Portfel: panel się zamyka, ekran się przełącza. */
+  onWykresy: () => void;
   /** Czy aplikacja UWAŻA, że trzyma blokadę ekranu. Patrz `Diagnostyka`. */
   blokadaEkranu: boolean;
   onZwolnijBlokade: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const [podekran, setPodekran] = useState<Podekran>('menu');
+
+  /**
+   * Zamknięcie panelu wraca do menu.
+   *
+   * Bez tego następne otwarcie „Więcej" ląduje w ustawieniach — bo stan
+   * podekranu przeżywa zamknięcie modala. Wyglądałoby to jak przypadkowe
+   * wejście nie tam, gdzie się dotknęło.
+   */
+  useEffect(() => {
+    if (!widoczny) setPodekran('menu');
+  }, [widoczny]);
+
+  const wUstawieniach = podekran === 'ustawienia';
 
   return (
     <Modal
@@ -51,52 +82,87 @@ export function PanelUstawien({
       <View style={s.tlo}>
         <View style={[s.panel, { paddingBottom: Math.max(16, insets.bottom) }]}>
           <View style={s.gora}>
-            <Text style={s.tytul}>Ustawienia</Text>
+            {wUstawieniach ? (
+              <Pressable
+                onPress={() => setPodekran('menu')}
+                style={s.zamknij}
+                accessibilityRole="button"
+                accessibilityLabel="Wróć do menu"
+              >
+                <Text style={s.zamknijTekst}>‹</Text>
+              </Pressable>
+            ) : null}
+
+            <Text style={s.tytul}>{wUstawieniach ? 'Ustawienia' : 'Więcej'}</Text>
+
             <Pressable
               onPress={onZamknij}
               style={s.zamknij}
               accessibilityRole="button"
-              accessibilityLabel="Zamknij ustawienia"
+              accessibilityLabel="Zamknij panel"
             >
               <Text style={s.zamknijTekst}>✕</Text>
             </Pressable>
           </View>
 
           <ScrollView style={s.lista} contentContainerStyle={s.listaWnetrze}>
-            <Pressable style={s.wejscie} onPress={onPortfel} accessibilityRole="button">
-              <Text style={s.wejscieIkona}>💰</Text>
-              <View style={s.wierszTekst}>
-                <Text style={s.wierszTytul}>Portfel Glovo</Text>
-                <Text style={s.wierszOpis}>Saldo i historia transakcji.</Text>
-              </View>
-              <Text style={s.wejscieStrzalka}>›</Text>
-            </Pressable>
+            {wUstawieniach ? (
+              <>
+                <Przelacznik
+                  tytul="Ekran nie gaśnie na zmianie"
+                  opis="Działa tylko przy otwartej zmianie. Poza pracą nic nie robi."
+                  wartosc={ustawienia.ekranNieGasnie}
+                  onZmien={(v) => onZmien({ ekranNieGasnie: v })}
+                />
 
-            <Przelacznik
-              tytul="Ekran nie gaśnie na zmianie"
-              opis="Działa tylko przy otwartej zmianie. Poza pracą nic nie robi."
-              wartosc={ustawienia.ekranNieGasnie}
-              onZmien={(v) => onZmien({ ekranNieGasnie: v })}
-            />
+                <Przelacznik
+                  tytul="Wysyłaj pozycję na zmianie"
+                  opis="Bot liczy z niej dojazd do restauracji. Wyłączenie oznacza powrót do liczenia od ostatniej pinezki wysłanej ręcznie."
+                  wartosc={ustawienia.wysylajPozycje}
+                  onZmien={(v) => onZmien({ wysylajPozycje: v })}
+                />
 
-            <Przelacznik
-              tytul="Wysyłaj pozycję na zmianie"
-              opis="Bot liczy z niej dojazd do restauracji. Wyłączenie oznacza powrót do liczenia od ostatniej pinezki wysłanej ręcznie."
-              wartosc={ustawienia.wysylajPozycje}
-              onZmien={(v) => onZmien({ wysylajPozycje: v })}
-            />
+                <Przelacznik
+                  tytul="Wysoka dokładność GPS"
+                  opis="Włączona: prawdziwy GPS, 5–15 m, ale radio pracuje ciągle. Wyłączona: pozycja z sieci, około 100 m — a serwer liczy zaufanie w metrach, więc zjada to jedną trzecią budżetu, zanim ruszysz."
+                  wartosc={ustawienia.wysokaDokladnosc}
+                  onZmien={(v) => onZmien({ wysokaDokladnosc: v })}
+                  wylaczony={!ustawienia.wysylajPozycje}
+                />
 
-            <Przelacznik
-              tytul="Wysoka dokładność GPS"
-              opis="Włączona: prawdziwy GPS, 5–15 m, ale radio pracuje ciągle. Wyłączona: pozycja z sieci, około 100 m — a serwer liczy zaufanie w metrach, więc zjada to jedną trzecią budżetu, zanim ruszysz."
-              wartosc={ustawienia.wysokaDokladnosc}
-              onZmien={(v) => onZmien({ wysokaDokladnosc: v })}
-              wylaczony={!ustawienia.wysylajPozycje}
-            />
+                <Diagnostyka blokada={blokadaEkranu} onZwolnij={onZwolnijBlokade} />
+              </>
+            ) : (
+              <>
+                <Wejscie
+                  ikona="💰"
+                  tytul="Portfel Glovo"
+                  opis="Saldo i historia transakcji."
+                  onPress={onPortfel}
+                />
 
-            <Diagnostyka blokada={blokadaEkranu} onZwolnij={onZwolnijBlokade} />
+                <Wejscie
+                  ikona="📊"
+                  tytul="Wykresy"
+                  opis="Zarobki, godziny i stawki oglądane miesiącem."
+                  onPress={onWykresy}
+                />
 
-            <WersjaAplikacji />
+                <Wejscie
+                  ikona="⚙️"
+                  tytul="Ustawienia"
+                  opis="Ekran, GPS i diagnostyka blokady."
+                  onPress={() => setPodekran('ustawienia')}
+                />
+
+                {/* Wersja zostaje NA POZIOMIE MENU, nie w ustawieniach.
+                    To najczęściej sprawdzana rzecz w całym panelu — służy do
+                    odpowiedzi „czy OTA doszło" i jest tak opisana w kompendium.
+                    Schowanie jej dwa dotknięcia głębiej wydłużyłoby procedurę,
+                    którą wykonuje się po każdym wdrożeniu. */}
+                <WersjaAplikacji />
+              </>
+            )}
           </ScrollView>
         </View>
       </View>
@@ -135,6 +201,30 @@ function Diagnostyka({ blokada, onZwolnij }: { blokada: boolean; onZwolnij: () =
         <Text style={s.przyciskDiagTekst}>Zwolnij blokadę ręcznie</Text>
       </Pressable>
     </View>
+  );
+}
+
+/** Pozycja menu prowadząca gdzie indziej. Cel dotykowy na całą szerokość. */
+function Wejscie({
+  ikona,
+  tytul,
+  opis,
+  onPress,
+}: {
+  ikona: string;
+  tytul: string;
+  opis: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={s.wejscie} onPress={onPress} accessibilityRole="button">
+      <Text style={s.wejscieIkona}>{ikona}</Text>
+      <View style={s.wierszTekst}>
+        <Text style={s.wierszTytul}>{tytul}</Text>
+        <Text style={s.wierszOpis}>{opis}</Text>
+      </View>
+      <Text style={s.wejscieStrzalka}>›</Text>
+    </Pressable>
   );
 }
 

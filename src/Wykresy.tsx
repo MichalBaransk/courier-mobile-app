@@ -9,13 +9,18 @@ import { C } from './theme';
 import type { DailyTotals } from './types';
 
 /**
- * Wykresy bez żadnej biblioteki — zwykłe `View` o wyliczonej wysokości
- * i przezroczystości.
+ * Siatka kalendarza na zwykłych `View` — bez SVG i bez biblioteki wykresów.
  *
- * Powód nie jest ideologiczny: każda biblioteka wykresów dla React Native
- * ciągnie za sobą `react-native-svg`, czyli moduł natywny. A moduł natywny
- * oznacza koniec aktualizacji przez OTA i powrót do budowania APK przy każdej
- * zmianie. Przy słupkach i siatce kalendarza ta cena jest absurdalna.
+ * ⚠️ POPRAWKA 20.08. Stał tu argument: „każda biblioteka wykresów ciągnie
+ * `react-native-svg`, czyli moduł natywny, a moduł natywny oznacza koniec
+ * aktualizacji przez OTA". **To przestało być prawdą i nikt tego nie zauważył.**
+ * `react-native-svg` jest w `package.json` (15.15.4) i jest wkompilowany w APK
+ * od kroku 30 — czyli OTA działa. Uzasadnienie przeżyło swój powód o kilka
+ * tygodni, dokładnie tak jak deterministyczny klucz idempotencji w `obraz.ts`.
+ *
+ * Kalendarz zostaje na `View`, ale już nie „bo SVG nie wolno" — tylko dlatego,
+ * że siatka siedmiu kolumn to siatka siedmiu kolumn i SVG nic by tu nie dodał.
+ * Właściwe wykresy rysuje `WykresySvg.tsx`, licząc skalę w `wykresLicz.ts`.
  */
 
 const DNI_SKROT = ['pon', 'wt', 'śr', 'czw', 'pt', 'sob', 'nd'];
@@ -35,57 +40,6 @@ function poDacie(dni: DailyTotals[]): Map<string, DailyTotals> {
 function doWykresu(wpis: DailyTotals | undefined): number {
   const v = skonczona(wpis?.totalNetto);
   return v !== null && v > 0 ? v : 0;
-}
-
-/* ========================================================================== */
-/*  Słupki tygodnia                                                           */
-/* ========================================================================== */
-
-export function WykresTygodnia({
-  zakres,
-  dni,
-  wybrany,
-  onWybierz,
-}: {
-  zakres: Zakres;
-  dni: DailyTotals[];
-  wybrany: string | null;
-  onWybierz: (data: string) => void;
-}) {
-  const mapa = poDacie(dni);
-  const daty = dniZakresu(zakres);
-  const maks = Math.max(...daty.map((d) => doWykresu(mapa.get(d))), 1);
-
-  return (
-    <View style={s.karta}>
-      <Text style={s.naglowek}>NETTO DZIEŃ PO DNIU</Text>
-
-      <View style={s.slupki}>
-        {daty.map((data, i) => {
-          const netto = doWykresu(mapa.get(data));
-          const wysokosc = netto > 0 ? Math.max(4, Math.round((procentUdzialu(netto, maks) / 100) * 110)) : 2;
-          const aktywny = wybrany === data;
-
-          return (
-            <Pressable key={data} style={s.kolumna} onPress={() => onWybierz(data)}>
-              <Text style={[s.kwotaNadSlupkiem, aktywny && s.kwotaAktywna]}>
-                {netto > 0 ? Math.round(netto) : ''}
-              </Text>
-              <View
-                style={[
-                  s.slupek,
-                  { height: wysokosc },
-                  netto === 0 && s.slupekPusty,
-                  aktywny && s.slupekAktywny,
-                ]}
-              />
-              <Text style={[s.podpisDnia, aktywny && s.podpisAktywny]}>{DNI_SKROT[i]}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
 }
 
 /* ========================================================================== */
@@ -300,21 +254,6 @@ const s = StyleSheet.create({
     marginBottom: 14,
   },
 
-  slupki: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  kolumna: { alignItems: 'center', flex: 1 },
-  kwotaNadSlupkiem: {
-    color: C.tekstPrzygaszony,
-    fontSize: 10,
-    marginBottom: 4,
-    height: 14,
-    fontVariant: ['tabular-nums'],
-  },
-  kwotaAktywna: { color: C.akcent, fontWeight: '700' },
-  slupek: { width: 22, borderRadius: 5, backgroundColor: C.akcent, opacity: 0.55 },
-  slupekPusty: { backgroundColor: C.obramowanie, opacity: 1 },
-  slupekAktywny: { opacity: 1 },
-  podpisDnia: { color: C.tekstPrzygaszony, fontSize: 11, marginTop: 6 },
-  podpisAktywny: { color: C.tekst, fontWeight: '700' },
 
   wiersze: {},
   wiersz: { flexDirection: 'row', alignItems: 'center' },
