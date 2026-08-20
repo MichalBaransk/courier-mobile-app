@@ -8,6 +8,7 @@ import { postLokalizacja } from './api';
 import { czyOsierocone } from './gpsTloReguly';
 import { zOdczytu } from './lokalizacjaOdczyt';
 import { ODSTEP_M, ODSTEP_MS } from './lokalizacja';
+import { zapewnijPowiadomienieZmiany } from './powiadomienieZmiany';
 import { readToken } from './storage';
 
 /**
@@ -104,6 +105,19 @@ export const obsluzOdczyty: TaskManager.TaskManagerTaskExecutor = async ({ data,
     await zatrzymajSledzenieTla();
     return;
   }
+
+  /**
+   * Przy okazji każdego odczytu: czy w pasku nadal coś wisi.
+   *
+   * Od Androida 14 wpis usługi pierwszoplanowej da się zdjąć palcem, a usługa
+   * chodzi dalej — kurier traci wtedy jedyny znak, że zmiana leci. Tu jest
+   * jedyne miejsce w całej aplikacji, które budzi się co dwadzieścia sekund
+   * ZAMKNIĘTEJ aplikacji, więc odtworzenie wpisu może się stać tylko stąd.
+   *
+   * Nie kosztuje nic ponad jedno zapytanie do systemu: gdy cokolwiek jest
+   * widoczne, `zapewnijPowiadomienieZmiany` wraca od razu.
+   */
+  await zapewnijPowiadomienieZmiany(null, true);
 
   const odczyt = zOdczytu(pozycja, teraz);
   if (!odczyt) return;

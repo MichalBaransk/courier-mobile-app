@@ -41,8 +41,8 @@ import {
 import { decyzjaSledzenia } from './src/gpsTloReguly';
 import { minutTrwania } from './src/limity';
 import {
-  pokazPowiadomienieZmiany,
   schowajPowiadomienieZmiany,
+  zapewnijPowiadomienieZmiany,
 } from './src/powiadomienieZmiany';
 import {
   dodaj as dodajDoKolejki,
@@ -810,17 +810,6 @@ function Aplikacja() {
 
     void (async () => {
       if (await uruchomSledzenieTla(ustawienia.wysokaDokladnosc)) {
-        /**
-         * Usługa GPS wystawiła własny, nieusuwalny wpis w pasku — nasz jest
-         * od tej chwili zbędny.
-         *
-         * Zdejmujemy go TUTAJ, a nie polegamy na kontroli w
-         * `pokazPowiadomienieZmiany`: efekt uzgadniający potrafi zdążyć
-         * pierwszy, gdy usługa jeszcze się podnosi, i wtedy w pasku wisiałyby
-         * dwa wpisy o tej samej rzeczy.
-         */
-        await schowajPowiadomienieZmiany();
-
         // Zadanie w tle żyje własnym życiem i NIE jest sprzątane przez
         // `return` tego efektu — ma przeżyć zamknięcie ekranu. Zatrzymuje je
         // osobny efekt uzgadniający, niżej.
@@ -885,15 +874,12 @@ function Aplikacja() {
       if (decyzja === 'stop') await zatrzymajSledzenieTla();
 
       /**
-       * Powiadomienie idzie ZA decyzją o śledzeniu, nie przed nią.
-       *
-       * `pokazPowiadomienieZmiany` odpuszcza, gdy usługa GPS już wisi
-       * w pasku — a to, czy wisi, rozstrzyga się linijkę wyżej. Odwrotna
-       * kolejność dawałaby dwa wpisy o tej samej rzeczy przy otwieraniu
-       * zmiany i zero przy zamykaniu.
+       * Powiadomienie idzie ZA decyzją o śledzeniu, nie przed nią — inaczej
+       * przy zamykaniu zmiany zakładalibyśmy wpis, który linijkę wyżej ma
+       * właśnie zniknąć razem z usługą.
        */
       if (zmianaTrwa) {
-        await pokazPowiadomienieZmiany(otwartaOd);
+        await zapewnijPowiadomienieZmiany(otwartaOd);
       } else {
         await schowajPowiadomienieZmiany();
       }

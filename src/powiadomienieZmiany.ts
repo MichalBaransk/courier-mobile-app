@@ -2,10 +2,9 @@ import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-import { czySledzenieChodzi } from './gpsTlo';
 
 /**
- * Nieusuwalne powiadomienie „zmiana trwa".
+ * Powiadomienie „zmiana trwa" — odtwarzane, bo nieusuwalnego już nie ma.
  *
  * PO CO. Zmiana zostawiona otwarta przez noc nie boli od razu — boli
  * następnego dnia, gdy zjazd wpada w złą dobę i psuje stawkę zł/h. Nie ma
@@ -17,9 +16,9 @@ import { czySledzenieChodzi } from './gpsTlo';
  * „zawsze" — więc kurier, który pozycji nie wysyła, nie dostawał żadnego
  * znaku, że zmiana leci.
  *
- * DWA ŹRÓDŁA, JEDNO POWIADOMIENIE. Gdy usługa GPS już wisi w pasku, NIE
- * dokładamy drugiego — dwa wpisy o tej samej rzeczy czyta się jak usterkę.
- * Stąd `czySledzenieChodzi()` w `pokazPowiadomienieZmiany`.
+ * DWA ŹRÓDŁA, JEDNO POWIADOMIENIE. Gdy w pasku coś od tej aplikacji już wisi
+ * — wpis usługi GPS albo nasz — nie dokładamy drugiego. Dwa wpisy o tej samej
+ * rzeczy czyta się jak usterkę.
  *
  * Które z dwóch widzisz, mówi Ci przy okazji, czy GPS pracuje:
  *
@@ -29,9 +28,22 @@ import { czySledzenieChodzi } from './gpsTlo';
  * | „Zmiana trwa — GPS nie wysyła pozycji" (ten plik)   | zmiana leci, pozycji nie ma |
  * | brak wpisu                                          | zmiany nie ma |
  *
- * Trzeci wiersz jest wart tyle, co dwa pierwsze — dlatego wpis jest odtwarzany
- * przy każdym powrocie aplikacji na wierzch (`przebudzenia` w `App.tsx`),
+ * Trzeci wiersz jest wart tyle, co dwa pierwsze — dlatego wpis jest odtwarzany,
  * a nie tylko zakładany raz przy otwarciu zmiany.
+ *
+ * ⚠️ „NIEUSUWALNE" NIE ISTNIEJE OD ANDROIDA 14. Platforma zmieniła znaczenie
+ * `FLAG_ONGOING_EVENT` (czyli `sticky: true`) tak, że użytkownik MOŻE zdjąć
+ * taki wpis machnięciem palca. Dotyczy to również powiadomienia usługi
+ * pierwszoplanowej — usługa chodzi dalej, tylko wpis znika. Opt-outu nie ma;
+ * wyjątkami są wyłącznie połączenia, multimedia, zarządzanie firmowe
+ * i domyślna wyszukiwarka.
+ * https://developer.android.com/about/versions/14/behavior-changes-all
+ *
+ * Dlatego `sticky` zostaje (na Androidzie 13 i starszym nadal działa), ale
+ * całą robotę wykonuje `zapewnijPowiadomienieZmiany` — sprawdza, czy wpis
+ * NADAL jest, i zakłada go z powrotem, gdy zniknął. Wołane przy każdym
+ * powrocie aplikacji na wierzch ORAZ z zadania GPS w tle, czyli co dwadzieścia
+ * sekund trwającej zmiany.
  */
 
 const KANAL = 'zmiana';
@@ -82,12 +94,25 @@ async function kanal(): Promise<void> {
  * możliwe po ponownym uruchomieniu. Ta sama zasada, co przy znaczniku startu
  * w `gpsTlo.ts`.
  */
-export async function pokazPowiadomienieZmiany(od: string | null): Promise<void> {
+export async function zapewnijPowiadomienieZmiany(
+  od: string | null,
+  gpsChodzi = false
+): Promise<void> {
   try {
-    // Usługa GPS ma już własny, nieusuwalny wpis. Drugi byłby szumem.
-    if (await czySledzenieChodzi()) return;
-
-    if ((await AsyncStorage.getItem(KLUCZ_ID)) !== null) return;
+    /**
+     * PYTAMY O TO, CO NAPRAWDĘ WIDAĆ, a nie o to, co powinno być widać.
+     *
+     * Wcześniej stało tu `czySledzenieChodzi()` — „skoro usługa GPS chodzi,
+     * to jej wpis wisi w pasku". To założenie przestało być prawdziwe:
+     * od Androida 14 wpis usługi da się zdjąć palcem, a usługa działa dalej.
+     * Wynikiem było zero powiadomień przy trwającej zmianie.
+     *
+     * `getPresentedNotificationsAsync()` zwraca to, co ta aplikacja ma
+     * w pasku TERAZ. Cokolwiek tam jest — wpis usługi GPS albo nasz —
+     * znaczy, że kurier widzi znak trwającej zmiany i nie ma co dokładać.
+     */
+    const widoczne = await Notifications.getPresentedNotificationsAsync();
+    if (widoczne.length > 0) return;
 
     const zgoda = await Notifications.requestPermissionsAsync();
     if (!zgoda.granted) return;
@@ -98,15 +123,18 @@ export async function pokazPowiadomienieZmiany(od: string | null): Promise<void>
       content: {
         title: 'Zmiana trwa',
         /**
-         * Treść mówi wprost, że pozycja NIE leci.
+         * Treść mówi wprost, czy pozycja leci — po samym pasku ma być widać,
+         * czy GPS pracuje.
          *
-         * Ten wpis pojawia się wyłącznie wtedy, gdy śledzenia w tle nie ma —
-         * gdy jest, w pasku wisi powiadomienie usługi GPS („Wysyłam pozycję…").
-         * Dwa różne zdania zamiast jednego to jedyny sposób, żeby po samym
-         * pasku dało się poznać, czy GPS pracuje.
+         * `gpsChodzi` jest tu potrzebne, bo ten wpis powstaje w DWÓCH
+         * sytuacjach: gdy śledzenia nie ma wcale, i gdy jest, ale kurier zdjął
+         * palcem wpis usługi (Android 14 na to pozwala). W drugim przypadku
+         * napisanie „GPS nie wysyła pozycji" byłoby nieprawdą.
          */
         body:
-          (od === null ? '' : `Od ${od} · `) + 'GPS nie wysyła pozycji. Pamiętaj o zjeździe.',
+          (od === null ? '' : `Od ${od} · `) +
+          (gpsChodzi ? 'Wysyłam pozycję. ' : 'GPS nie wysyła pozycji. ') +
+          'Pamiętaj o zjeździe.',
         // Android: wpisu nie da się zdjąć machnięciem…
         sticky: true,
         // …ani przypadkowym dotknięciem.
