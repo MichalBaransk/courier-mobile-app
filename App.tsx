@@ -810,11 +810,37 @@ function Aplikacja() {
 
     void (async () => {
       if (await uruchomSledzenieTla(ustawienia.wysokaDokladnosc)) {
+        /**
+         * Nasz wpis w pasku schodzi DOPIERO TERAZ, gdy usługa naprawdę ruszyła
+         * i wystawiła własny („Zmiana trwa — Wysyłam pozycję…").
+         *
+         * TU BYŁ BŁĄD zgłoszony z telefonu: powiadomienie twierdziło „GPS nie
+         * wysyła pozycji", mimo zgody „zawsze" i działającego śledzenia.
+         * Przyczyną był WYŚCIG DWÓCH EFEKTÓW. Ten uruchamia śledzenie, a efekt
+         * uzgadniający pyta `hasStartedLocationUpdatesAsync` — i pyta w chwili,
+         * gdy tutaj trwa jeszcze pytanie o zgodę. Dostaje „nie chodzi",
+         * zakłada wpis z takim tekstem i nigdy go nie poprawia, bo nic w jego
+         * zależnościach się już nie zmienia.
+         *
+         * Zdjęcie wpisu PO udanym starcie rozstrzyga to bez zgadywania:
+         * kolejność jest wymuszona, a nie założona.
+         */
+        await schowajPowiadomienieZmiany();
+
         // Zadanie w tle żyje własnym życiem i NIE jest sprzątane przez
         // `return` tego efektu — ma przeżyć zamknięcie ekranu. Zatrzymuje je
         // osobny efekt uzgadniający, niżej.
         return;
       }
+
+      /**
+       * Tło się nie udało — wpis ma o tym powiedzieć.
+       *
+       * Efekt uzgadniający mógł go założyć wcześniej albo nie (zależy, który
+       * wystartował pierwszy). Wołamy więc wprost: stały identyfikator sprawia,
+       * że to podmiana, a nie drugie powiadomienie.
+       */
+      await zapewnijPowiadomienieZmiany(otwartaOd);
 
       if (!(await czyJestZgoda())) {
         const zgoda = await zapytajOZgode();
@@ -835,7 +861,7 @@ function Aplikacja() {
       zatrzymane = true;
       zatrzymaj?.();
     };
-  }, [stan, token, zmianaTrwa, ustawienia.wysylajPozycje, ustawienia.wysokaDokladnosc]);
+  }, [stan, token, zmianaTrwa, otwartaOd, ustawienia.wysylajPozycje, ustawienia.wysokaDokladnosc]);
 
   /**
    * Uzgodnienie stanu: śledzenie i powiadomienie kontra rzeczywistość.

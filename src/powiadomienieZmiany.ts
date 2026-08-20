@@ -134,6 +134,16 @@ export async function zapewnijPowiadomienieZmiany(od: string | null): Promise<vo
      */
     if (await czySledzenieChodzi()) return;
 
+    /**
+     * ⚠️ To sprawdzenie mówi prawdę tylko O TEJ CHWILI.
+     *
+     * Gdy zmiana dopiero się otwiera, śledzenie może być w połowie
+     * uruchamiania (trwa pytanie o zgodę) i wyjdzie „nie chodzi". Dlatego
+     * `App.tsx` po UDANYM starcie woła `schowajPowiadomienieZmiany()` —
+     * inaczej zostawał tu wpis „GPS nie wysyła pozycji" przy działającym
+     * GPS-ie i zgodzie „zawsze". Zgłoszone z telefonu 20.08.
+     */
+
     const zgoda = await Notifications.requestPermissionsAsync();
     if (!zgoda.granted) return;
 
