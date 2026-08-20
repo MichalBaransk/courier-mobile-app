@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+
+import { czySledzenieChodzi } from './gpsTlo';
 
 
 /**
@@ -40,14 +41,37 @@ import { Platform } from 'react-native';
  * https://developer.android.com/about/versions/14/behavior-changes-all
  *
  * Dlatego `sticky` zostaje (na Androidzie 13 i starszym nadal działa), ale
- * całą robotę wykonuje `zapewnijPowiadomienieZmiany` — sprawdza, czy wpis
- * NADAL jest, i zakłada go z powrotem, gdy zniknął. Wołane przy każdym
- * powrocie aplikacji na wierzch ORAZ z zadania GPS w tle, czyli co dwadzieścia
- * sekund trwającej zmiany.
+ * całą robotę wykonuje `zapewnijPowiadomienieZmiany`, wołane przy każdym
+ * powrocie aplikacji na wierzch. Machnięty wpis wraca, gdy otworzysz apkę.
+ *
+ * Odtwarzania z zadania GPS w tle (P25) już NIE MA. Zadanie budzi się wtedy,
+ * gdy śledzenie chodzi — a wtedy w pasku i tak wisi wpis usługi, więc
+ * odtwarzanie było albo bezczynne, albo produkowało drugi, przeczący wpis.
  */
 
 const KANAL = 'zmiana';
-const KLUCZ_ID = 'powiadomienie_zmiany_id';
+
+/**
+ * STAŁY identyfikator powiadomienia. Tu leży cała ochrona przed duplikatami.
+ *
+ * Android traktuje wpis o tym samym identyfikatorze jako PODMIANĘ, nie jako
+ * nowy. Dzięki temu nieważne, ile razy i z ilu miejsc naraz zawołamy
+ * `zapewnijPowiadomienieZmiany` — w pasku będzie dokładnie jeden.
+ *
+ * ZASTĄPIŁO TO DWA STRAŻNIKI, KTÓRE NIE DZIAŁAŁY:
+ *
+ * 1. Identyfikator w `AsyncStorage` (P24) — działał, dopóki wołający był jeden.
+ * 2. Odpytywanie `getPresentedNotificationsAsync()` (P25) — **ściga się samo
+ *    ze sobą**. Sprawdzenie jest asynchroniczne, więc kilka wywołań
+ *    startujących w tej samej chwili widzi pusty pasek i każde zakłada własny
+ *    wpis. Dokładnie to pokazał zrzut z telefonu: cztery „Zmiana trwa"
+ *    o tej samej minucie, znikające pojedynczo przy machaniu palcem.
+ *
+ * Nauka: przy stanie współdzielonym „sprawdź, potem zrób" jest błędem
+ * z definicji. Ta sama pomyłka, co przy idempotencji w API bota — i tam
+ * rozwiązaniem też było przeniesienie rozstrzygnięcia tam, gdzie jest atomowe.
+ */
+const ID_POWIADOMIENIA = 'zmiana-trwa';
 
 /**
  * Bez tego powiadomienie wysłane przy otwartej aplikacji nigdzie się nie pokaże.
@@ -87,64 +111,49 @@ async function kanal(): Promise<void> {
 }
 
 /**
- * Pokazuje powiadomienie, jeśli jeszcze go nie ma.
+ * Zakłada albo odświeża powiadomienie o trwającej zmianie.
  *
- * Identyfikator ląduje w `AsyncStorage`, a nie w zmiennej modułowej, bo
- * powiadomienie **przeżywa ubicie aplikacji** — a jego skasowanie musi być
- * możliwe po ponownym uruchomieniu. Ta sama zasada, co przy znaczniku startu
- * w `gpsTlo.ts`.
+ * Wołać można ile razy się chce i skąd się chce — stały identyfikator
+ * sprawia, że wpis jest PODMIENIANY, nie dokładany.
  */
-export async function zapewnijPowiadomienieZmiany(
-  od: string | null,
-  gpsChodzi = false
-): Promise<void> {
+export async function zapewnijPowiadomienieZmiany(od: string | null): Promise<void> {
   try {
     /**
-     * PYTAMY O TO, CO NAPRAWDĘ WIDAĆ, a nie o to, co powinno być widać.
+     * Gdy chodzi śledzenie w tle, Android sam wystawia wpis usługi
+     * pierwszoplanowej („Zmiana trwa — Wysyłam pozycję…"). Nasz byłby wtedy
+     * drugim wpisem o tej samej rzeczy, w dodatku przeczącym tamtemu.
      *
-     * Wcześniej stało tu `czySledzenieChodzi()` — „skoro usługa GPS chodzi,
-     * to jej wpis wisi w pasku". To założenie przestało być prawdziwe:
-     * od Androida 14 wpis usługi da się zdjąć palcem, a usługa działa dalej.
-     * Wynikiem było zero powiadomień przy trwającej zmianie.
+     * Wiem o tym z `hasStartedLocationUpdatesAsync`, czyli od systemu, a nie
+     * z odpytywania paska powiadomień. Wersja z `getPresentedNotificationsAsync`
+     * wyglądała mądrzej i była gorsza — patrz `ID_POWIADOMIENIA`.
      *
-     * `getPresentedNotificationsAsync()` zwraca to, co ta aplikacja ma
-     * w pasku TERAZ. Cokolwiek tam jest — wpis usługi GPS albo nasz —
-     * znaczy, że kurier widzi znak trwającej zmiany i nie ma co dokładać.
+     * ⚠️ CZEGO TO NIE ZAŁATWIA: zdjęcia palcem wpisu USŁUGI przy działającym
+     * GPS-ie. Usługa chodzi dalej, więc tu nadal wychodzi „jest wpis",
+     * a w pasku pusto. Nie umiem tego wykryć — Android nie daje na to
+     * żadnego sygnału, a zgadywanie skończyło się czterema powiadomieniami.
      */
-    const widoczne = await Notifications.getPresentedNotificationsAsync();
-    if (widoczne.length > 0) return;
+    if (await czySledzenieChodzi()) return;
 
     const zgoda = await Notifications.requestPermissionsAsync();
     if (!zgoda.granted) return;
 
     await kanal();
 
-    const id = await Notifications.scheduleNotificationAsync({
+    await Notifications.scheduleNotificationAsync({
+      // Stały identyfikator = podmiana zamiast duplikatu.
+      identifier: ID_POWIADOMIENIA,
       content: {
         title: 'Zmiana trwa',
-        /**
-         * Treść mówi wprost, czy pozycja leci — po samym pasku ma być widać,
-         * czy GPS pracuje.
-         *
-         * `gpsChodzi` jest tu potrzebne, bo ten wpis powstaje w DWÓCH
-         * sytuacjach: gdy śledzenia nie ma wcale, i gdy jest, ale kurier zdjął
-         * palcem wpis usługi (Android 14 na to pozwala). W drugim przypadku
-         * napisanie „GPS nie wysyła pozycji" byłoby nieprawdą.
-         */
         body:
-          (od === null ? '' : `Od ${od} · `) +
-          (gpsChodzi ? 'Wysyłam pozycję. ' : 'GPS nie wysyła pozycji. ') +
-          'Pamiętaj o zjeździe.',
-        // Android: wpisu nie da się zdjąć machnięciem…
+          (od === null ? '' : `Od ${od} · `) + 'GPS nie wysyła pozycji. Pamiętaj o zjeździe.',
+        // Android 13 i starsze: wpisu nie da się zdjąć machnięciem.
+        // Od Androida 14 to tylko sugestia — patrz nagłówek pliku.
         sticky: true,
-        // …ani przypadkowym dotknięciem.
         autoDismiss: false,
         ...(Platform.OS === 'android' ? { channelId: KANAL } : {}),
       },
       trigger: null,
     });
-
-    await AsyncStorage.setItem(KLUCZ_ID, id);
   } catch {
     /**
      * Powiadomienie jest wygodą, nie danymi. Odmowa zgody, brak kanału albo
@@ -157,17 +166,13 @@ export async function zapewnijPowiadomienieZmiany(
 /** Zdejmuje powiadomienie. Bezpieczne do wywołania, gdy żadnego nie ma. */
 export async function schowajPowiadomienieZmiany(): Promise<void> {
   try {
-    const id = await AsyncStorage.getItem(KLUCZ_ID);
-    if (id !== null) {
-      await Notifications.dismissNotificationAsync(id);
-      await Notifications.cancelScheduledNotificationAsync(id);
-    }
+    await Notifications.dismissNotificationAsync(ID_POWIADOMIENIA);
   } catch {
-    /* zob. wyżej */
+    /* nie było czego zdejmować */
   }
   try {
-    await AsyncStorage.removeItem(KLUCZ_ID);
+    await Notifications.cancelScheduledNotificationAsync(ID_POWIADOMIENIA);
   } catch {
-    /* pusto */
+    /* jw. */
   }
 }
