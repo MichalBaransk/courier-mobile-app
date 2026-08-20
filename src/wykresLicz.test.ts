@@ -331,3 +331,18 @@ describe('polozenieKosza — próg opłacalności', () => {
     expect(polozenieKosza(0, 0.5, null)).toBe('nad');
   });
 });
+
+describe("seriaDni 'zlKm' — dzień bez kilometrów nie ma stawki", () => {
+  const zakres = { od: '2026-08-01', do: '2026-08-02' };
+
+  it('liczy netto na kilometr', () => {
+    const dni = [dzien({ date: '2026-08-01', totalNetto: 100, distanceKm: 50 })];
+    expect(seriaDni(dni, zakres, 'zlKm')[0]?.wartosc).toBe(2);
+  });
+
+  it('zero kilometrów daje null, a NIE zero', () => {
+    // Zero czytałoby się na wykresie jak „jechał za darmo".
+    const dni = [dzien({ date: '2026-08-01', totalNetto: 100, distanceKm: 0 })];
+    expect(seriaDni(dni, zakres, 'zlKm')[0]?.wartosc).toBeNull();
+  });
+});

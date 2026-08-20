@@ -120,7 +120,7 @@ export interface PunktDnia {
 }
 
 /** Co da się narysować z dnia. Nazwy własne, bo pola API są po angielsku. */
-export type MiaraDnia = 'netto' | 'brutto' | 'godziny' | 'zlH' | 'km' | 'paliwo';
+export type MiaraDnia = 'netto' | 'brutto' | 'godziny' | 'zlH' | 'zlKm' | 'km' | 'paliwo';
 
 function miara(d: DailyTotals, ktora: MiaraDnia): number | null {
   switch (ktora) {
@@ -134,6 +134,13 @@ function miara(d: DailyTotals, ktora: MiaraDnia): number | null {
       return skonczona(d.distanceKm);
     case 'paliwo':
       return skonczona(d.fuelCost);
+    case 'zlKm': {
+      // Tak samo jak przy zł/h: bez przejechanych kilometrów ta wielkość
+      // nie istnieje, a zero czytałoby się jak „jechał za darmo".
+      const km = skonczona(d.distanceKm);
+      if (km === null || km <= 0) return null;
+      return iloraz(skonczona(d.totalNetto) ?? 0, km);
+    }
     case 'zlH': {
       // Stawka bez godzin nie istnieje — i nie wolno jej udawać zerem.
       const h = skonczona(d.workHours);

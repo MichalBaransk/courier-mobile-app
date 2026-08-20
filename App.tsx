@@ -74,6 +74,7 @@ import { wczytajUstawienia, zapiszUstawienia } from './src/ustawieniaMagazyn';
 import { KalendarzMiesiaca } from './src/Wykresy';
 import { WykresyDni } from './src/WykresyDni';
 import { WykresyOfert } from './src/WykresyOfert';
+import { WykresyProfilu } from './src/WykresyProfilu';
 import { C } from './src/theme';
 import type {
   ApiInfo,
@@ -1261,6 +1262,7 @@ function Aplikacja() {
             {/* Oferty CAŁEGO miesiąca, nie `ofertyWidoku`. Rozkład stawek
                 z jednego dnia to kilkanaście słupków po jednym. */}
             <WykresyOfert oferty={oferty} minStawka={info?.minStawkaNettoKm ?? null} />
+            <WykresyProfilu dni={dniMiesiaca} zakres={zakresMiesiaca(miesiac)} />
           </>
         ) : null}
 
