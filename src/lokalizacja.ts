@@ -13,15 +13,15 @@ import { czyWartoWyslac, zOdczytu, type OdczytPozycji } from './lokalizacjaOdczy
  * To jest śledzenie NA PIERWSZYM PLANIE. Działa, dopóki aplikacja jest na
  * wierzchu. Gdy przełączysz się do Glovo, Android zatrzyma odczyty.
  *
- * Praca w TLE wymaga `expo-task-manager`, którego w projekcie NIE MA
- * (sprawdź `package.json`). To osobny moduł natywny, więc nie da się go
- * dołożyć przez `eas update` — potrzebny jest nowy APK. Reguła projektu mówi
- * wyraźnie: modułów natywnych nie dokładamy po jednym, tylko paczką (§7
- * kompendium). Dlatego na razie tego nie ma.
+ * ⚠️ OD 20.08 TO JEST ZAPAS, NIE GŁÓWNA DROGA. Praca w tle siedzi
+ * w `gpsTlo.ts` i wchodzi pierwsza; ten plik obsługuje przypadki, w których
+ * tamta odpadła: brak `expo-task-manager` w zainstalowanym APK albo odmowa
+ * zgody „zawsze". Lepsza gorsza pozycja niż żadna.
  *
- * Co z tego wynika w praktyce: pozycja odświeża się wtedy, gdy trzymasz tę
- * aplikację otwartą, i pozostaje w bazie po jej zamknięciu. Serwer sam ocenia,
- * czy jest jeszcze coś warta — patrz budżet błędu w `lokalizacja.rules.ts`.
+ * KOMENTARZ, KTÓRY TU STAŁ, KŁAMAŁ. Twierdził, że `expo-task-manager`
+ * „w projekcie NIE MA (sprawdź package.json)" — a moduł jest tam od kroku 30.
+ * Uzasadnienie przeżyło swój powód i przez jedną sesję blokowało robotę,
+ * która była do zrobienia od dawna. Czwarty taki przypadek w tym projekcie.
  */
 
 /**
@@ -58,9 +58,9 @@ export type StanZgody = 'przyznana' | 'odmowa' | 'blad';
 /**
  * Pyta o zgodę na lokalizację przy użyciu aplikacji.
  *
- * NIE pytamy o zgodę „zawsze" (w tle) — bez `expo-task-manager` i tak nie
- * mielibyśmy jej z czego użyć, a Android pokazuje wtedy osobny, straszący
- * ekran systemowy. Prosimy o uprawnienie, które faktycznie wykorzystamy.
+ * TA funkcja pyta wyłącznie o pierwszy plan. O zgodę „zawsze" prosi
+ * `zapytajOZgodeTla()` z `gpsTlo.ts` — razem z wyjaśnieniem, bo Android
+ * wyrzuca wtedy na pełny ekran ustawień systemowych.
  */
 export async function zapytajOZgode(): Promise<StanZgody> {
   try {

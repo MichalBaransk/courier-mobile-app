@@ -32,6 +32,13 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { PONOWIENIE_KOLEJKI_MS } from './src/config';
 import { czyJestZgoda, sledzPozycje, zapytajOZgode } from './src/lokalizacja';
 import {
+  czySledzenieChodzi,
+  czyTloDostepne,
+  uruchomSledzenieTla,
+  zatrzymajSledzenieTla,
+} from './src/gpsTlo';
+import { decyzjaSledzenia } from './src/gpsTloReguly';
+import {
   dodaj as dodajDoKolejki,
   nastepny,
   oznaczOdrzucony,
@@ -727,9 +734,10 @@ function Aplikacja() {
    * DZISIAJ. Poza zmianą aplikacja nie dotyka GPS-a w ogóle — nie ma po co,
    * a bateria jest u kuriera zasobem krytycznym.
    *
-   * ⚠️ TYLKO NA PIERWSZYM PLANIE. Praca w tle wymaga `expo-task-manager`,
-   * którego w projekcie nie ma — to moduł natywny, więc nie wejdzie przez OTA.
-   * Szczegóły w komentarzu w `src/lokalizacja.ts`.
+   * NAJPIERW TŁO, PIERWSZY PLAN JAKO ZAPAS. `uruchomSledzenieTla()` zwraca
+   * `false`, gdy modułu nie ma w APK albo gdy nie dostaliśmy zgody „zawsze" —
+   * i dopiero wtedy wchodzi stary `sledzPozycje`. Kurier bez zgody na tło ma
+   * mieć gorszą pozycję, a nie żadnej.
    *
    * Błędy wysyłki są POŁYKANE świadomie i jest to jedyne takie miejsce
    * w aplikacji. Pozycja to dane odtwarzalne — za dwadzieścia sekund będzie
@@ -743,6 +751,13 @@ function Aplikacja() {
     let zatrzymaj: (() => void) | null = null;
 
     void (async () => {
+      if (await uruchomSledzenieTla(ustawienia.wysokaDokladnosc)) {
+        // Zadanie w tle żyje własnym życiem i NIE jest sprzątane przez
+        // `return` tego efektu — ma przeżyć zamknięcie ekranu. Zatrzymuje je
+        // osobny efekt uzgadniający, niżej.
+        return;
+      }
+
       if (!(await czyJestZgoda())) {
         const zgoda = await zapytajOZgode();
         if (zgoda !== 'przyznana') return;
@@ -763,6 +778,31 @@ function Aplikacja() {
       zatrzymaj?.();
     };
   }, [stan, token, zmianaTrwa, ustawienia.wysylajPozycje, ustawienia.wysokaDokladnosc]);
+
+  /**
+   * Uzgodnienie tła ze stanem zmiany — zatrzymywanie.
+   *
+   * OSOBNY EFEKT, bo śledzenie w tle celowo nie jest sprzątane przez `return`
+   * tamtego. Tamten efekt uruchamia; ten pilnuje, żeby to, co zastaliśmy, było
+   * zgodne z tym, jak być powinno.
+   *
+   * Bez tego zostaje SIEROTA: ubijasz aplikację z otwartą zmianą, zamykasz
+   * zmianę w Telegramie, odpalasz aplikację — a usługa pierwszoplanowa chodzi
+   * dalej, bo nikt jej nie kazał przestać. Druga zapora, na wypadek gdybyś
+   * aplikacji w ogóle nie otworzył, siedzi w samym zadaniu (`czyOsierocone`).
+   */
+  useEffect(() => {
+    if (stan !== 'gotowe') return;
+
+    void (async () => {
+      const decyzja = decyzjaSledzenia({
+        zmianaTrwa,
+        wysylajPozycje: ustawienia.wysylajPozycje,
+        zadanieChodzi: await czySledzenieChodzi(),
+      });
+      if (decyzja === 'stop') await zatrzymajSledzenieTla();
+    })();
+  }, [stan, zmianaTrwa, ustawienia.wysylajPozycje]);
 
   /**
    * Powrót z tła to najlepszy moment na ponowienie.

@@ -3,6 +3,8 @@ import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 
+import { czyTloDostepne } from './gpsTlo';
+
 import { C } from './theme';
 import type { Ustawienia } from './ustawienia';
 
@@ -117,7 +119,10 @@ export function PanelUstawien({
 
                 <Przelacznik
                   tytul="Wysyłaj pozycję na zmianie"
-                  opis="Bot liczy z niej dojazd do restauracji. Wyłączenie oznacza powrót do liczenia od ostatniej pinezki wysłanej ręcznie."
+                  opis={
+                    'Bot liczy z niej dojazd do restauracji. Przy zgodzie „zawsze" leci też ' +
+                    'przy schowanym telefonie — bez niej tylko przy tej aplikacji na wierzchu.'
+                  }
                   wartosc={ustawienia.wysylajPozycje}
                   onZmien={(v) => onZmien({ wysylajPozycje: v })}
                 />
@@ -272,6 +277,25 @@ function Przelacznik({
 function WersjaAplikacji() {
   const identyfikator = Updates.updateId ?? null;
 
+  /**
+   * Czy moduł zadań w tle jest w TYM APK.
+   *
+   * `eas update` wysyła wyłącznie JavaScript — modułu natywnego nie wniesie.
+   * Bez tego wiersza „GPS w tle nie działa" i „GPS w tle nie ma w tym buildzie"
+   * wyglądają identycznie, a naprawia się je zupełnie inaczej: pierwsze kodem,
+   * drugie komendą `eas build`.
+   */
+  const [tlo, setTlo] = useState<boolean | null>(null);
+  useEffect(() => {
+    let aktualne = true;
+    void czyTloDostepne().then((v) => {
+      if (aktualne) setTlo(v);
+    });
+    return () => {
+      aktualne = false;
+    };
+  }, []);
+
   return (
     <View style={s.stopka}>
       <Text style={s.stopkaTytul}>Wersja</Text>
@@ -284,6 +308,10 @@ function WersjaAplikacji() {
       <Wiersz
         etykieta="Aktualizacja"
         wartosc={identyfikator === null ? 'wbudowana' : identyfikator.slice(0, 8)}
+      />
+      <Wiersz
+        etykieta="Zadania w tle"
+        wartosc={tlo === null ? '…' : tlo ? 'dostępne' : 'brak w tym APK'}
       />
     </View>
   );
