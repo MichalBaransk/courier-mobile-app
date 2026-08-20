@@ -40,6 +40,30 @@ export const ZADANIE_GPS = 'glovo-gps-tlo';
 /** Klucz z momentem uruchomienia. Zmienna modułowa nie przeżyje ubicia procesu. */
 const KLUCZ_STARTU = 'gps_tlo_start';
 
+/**
+ * Powód ostatniej nieudanej próby uruchomienia śledzenia.
+ *
+ * PO CO. Cały ten plik to łańcuch zapasowy: nie ma modułu → nie ma zgody →
+ * nie udał się start → wracamy na pierwszy plan. Każde z tych ogniw zwracało
+ * po prostu `false`, a `catch` pisał do konsoli, której na telefonie nikt nie
+ * widzi. Skutkiem był 20.08 dokładnie ten dialog: „powiadomienie twierdzi, że
+ * GPS nie działa, a jednak działa" — bo pojedynczy odczyt przy ocenie oferty
+ * to `getCurrentPositionAsync` (pierwszy plan) i z tłem nie ma nic wspólnego.
+ *
+ * Zapisany powód trafia do „Więcej → Ustawienia → Diagnostyka". Bez tego każda
+ * kolejna rozmowa o tle byłaby zgadywaniem, której odmowy dotyczy.
+ */
+const KLUCZ_POWODU = 'gps_tlo_powod';
+
+async function zapiszPowod(powod: string | null): Promise<void> {
+  try {
+    if (powod === null) await AsyncStorage.removeItem(KLUCZ_POWODU);
+    else await AsyncStorage.setItem(KLUCZ_POWODU, powod);
+  } catch {
+    /* diagnostyka nie może wywrócić działania */
+  }
+}
+
 async function zapiszStart(teraz: number): Promise<void> {
   try {
     await AsyncStorage.setItem(KLUCZ_STARTU, String(teraz));
@@ -198,9 +222,25 @@ export async function zapytajOZgodeTla(): Promise<boolean> {
  */
 export async function uruchomSledzenieTla(wysokaDokladnosc: boolean): Promise<boolean> {
   try {
-    if (!(await czyTloDostepne())) return false;
-    if (!(await zapytajOZgodeTla())) return false;
-    if (await czySledzenieChodzi()) return true;
+    if (!(await czyTloDostepne())) {
+      await zapiszPowod('Brak modułu expo-task-manager w tym APK — potrzebny nowy build.');
+      return false;
+    }
+    if (!(await TaskManager.isTaskRegisteredAsync(ZADANIE_GPS))) {
+      // Rejestracja siedzi w `gpsTloZadanie.ts`, wciąganym przez `require`
+      // w `try/catch` w `index.ts`. Jeśli tamten `require` padł, start i tak
+      // wywaliłby się na „Task not defined" — lepiej powiedzieć to wprost.
+      await zapiszPowod('Zadanie nie zostało zarejestrowane przy starcie aplikacji.');
+      return false;
+    }
+    if (!(await zapytajOZgodeTla())) {
+      await zapiszPowod('Brak zgody „zawsze" na lokalizację.');
+      return false;
+    }
+    if (await czySledzenieChodzi()) {
+      await zapiszPowod(null);
+      return true;
+    }
 
     await zapiszStart(Date.now());
 
@@ -222,11 +262,65 @@ export async function uruchomSledzenieTla(wysokaDokladnosc: boolean): Promise<bo
       showsBackgroundLocationIndicator: true,
     });
 
+    await zapiszPowod(null);
     return true;
   } catch (err) {
-    console.warn('[GPS tło] nie udało się uruchomić:', err);
+    const tresc = err instanceof Error ? err.message : String(err);
+    console.warn('[GPS tło] nie udało się uruchomić:', tresc);
+    await zapiszPowod(`Start odrzucony przez system: ${tresc}`);
     return false;
   }
+}
+
+/* ========================================================================== */
+/*  Diagnostyka                                                               */
+/* ========================================================================== */
+
+export interface StanTla {
+  /** Czy `expo-task-manager` jest w tym APK. */
+  dostepne: boolean;
+  /** Czy `defineTask` przeszło przy starcie aplikacji. */
+  zarejestrowane: boolean;
+  /** Zgoda „zawsze" — bez niej Android nie wyda pozycji przy schowanym telefonie. */
+  zgodaTla: boolean;
+  /** Czy usługa faktycznie chodzi TERAZ. */
+  chodzi: boolean;
+  /** Powód ostatniej odmowy albo `null`, gdy ostatni start się udał. */
+  powod: string | null;
+}
+
+/**
+ * Pięć odpowiedzi, po jednej na każde ogniwo łańcucha.
+ *
+ * Kolejność w interfejsie ma być ta sama, co kolejność sprawdzeń w
+ * `uruchomSledzenieTla` — pierwszy wiersz na „nie" wskazuje miejsce, w którym
+ * się urywa, bez czytania kodu.
+ */
+export async function stanTla(): Promise<StanTla> {
+  const dostepne = await czyTloDostepne();
+
+  let zarejestrowane = false;
+  try {
+    zarejestrowane = dostepne && (await TaskManager.isTaskRegisteredAsync(ZADANIE_GPS));
+  } catch {
+    zarejestrowane = false;
+  }
+
+  let zgodaTla = false;
+  try {
+    zgodaTla = (await Location.getBackgroundPermissionsAsync()).status === 'granted';
+  } catch {
+    zgodaTla = false;
+  }
+
+  let powod: string | null = null;
+  try {
+    powod = await AsyncStorage.getItem(KLUCZ_POWODU);
+  } catch {
+    powod = null;
+  }
+
+  return { dostepne, zarejestrowane, zgodaTla, chodzi: await czySledzenieChodzi(), powod };
 }
 
 export async function zatrzymajSledzenieTla(): Promise<void> {

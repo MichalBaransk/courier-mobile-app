@@ -5,6 +5,7 @@ import * as Updates from 'expo-updates';
 
 import { czyTloDostepne } from './gpsTlo';
 
+import { stanTla, type StanTla } from './gpsTlo';
 import { C } from './theme';
 import type { Ustawienia } from './ustawienia';
 
@@ -135,7 +136,7 @@ export function PanelUstawien({
                   wylaczony={!ustawienia.wysylajPozycje}
                 />
 
-                <Diagnostyka blokada={blokadaEkranu} onZwolnij={onZwolnijBlokade} />
+                <Diagnostyka blokada={blokadaEkranu} onZwolnij={onZwolnijBlokade} widoczny={widoczny} />
               </>
             ) : (
               <>
@@ -192,7 +193,29 @@ export function PanelUstawien({
  * Przycisk zwalnia blokadę bezwarunkowo, także wtedy, gdy stan mówi „zdjęta" —
  * właśnie po to, żeby dało się sprawdzić przypadek rozjazdu.
  */
-function Diagnostyka({ blokada, onZwolnij }: { blokada: boolean; onZwolnij: () => void }) {
+function Diagnostyka({
+  blokada,
+  onZwolnij,
+  widoczny,
+}: {
+  blokada: boolean;
+  onZwolnij: () => void;
+  /** Odświeżamy przy każdym otwarciu panelu — stan tła zmienia się bez nas. */
+  widoczny: boolean;
+}) {
+  const [tlo, setTlo] = useState<StanTla | null>(null);
+
+  useEffect(() => {
+    if (!widoczny) return;
+    let aktualne = true;
+    void stanTla().then((s) => {
+      if (aktualne) setTlo(s);
+    });
+    return () => {
+      aktualne = false;
+    };
+  }, [widoczny]);
+
   return (
     <View style={s.stopka}>
       <Text style={s.stopkaTytul}>Diagnostyka</Text>
@@ -202,9 +225,39 @@ function Diagnostyka({ blokada, onZwolnij }: { blokada: boolean; onZwolnij: () =
           {blokada ? 'założona' : 'zdjęta'}
         </Text>
       </View>
+
+      {/* Kolejność wierszy = kolejność sprawdzeń w `uruchomSledzenieTla`.
+          Pierwszy wiersz na „nie" wskazuje ogniwo, na którym się urywa. */}
+      <Tak etykieta="Moduł zadań w tle" wartosc={tlo?.dostepne} />
+      <Tak etykieta="Zadanie zarejestrowane" wartosc={tlo?.zarejestrowane} />
+      <Tak etykieta={'Zgoda „zawsze"'} wartosc={tlo?.zgodaTla} />
+      <Tak etykieta="Śledzenie w tle chodzi" wartosc={tlo?.chodzi} />
+
+      {tlo?.powod != null ? <Text style={s.powod}>Ostatnia odmowa: {tlo.powod}</Text> : null}
+
       <Pressable style={s.przyciskDiag} onPress={onZwolnij} accessibilityRole="button">
         <Text style={s.przyciskDiagTekst}>Zwolnij blokadę ręcznie</Text>
       </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Wiersz „tak / nie / —".
+ *
+ * `undefined` to NIE to samo, co `false`: znaczy „jeszcze nie sprawdziłem".
+ * Pokazanie wtedy „nie" byłoby zmyślaniem odpowiedzi — ta sama zasada, co przy
+ * `null` na wykresach.
+ */
+function Tak({ etykieta, wartosc }: { etykieta: string; wartosc: boolean | undefined }) {
+  const opis = wartosc === undefined ? '…' : wartosc ? 'tak' : 'NIE';
+  const kolor =
+    wartosc === undefined ? C.tekstPrzygaszony : wartosc ? C.akcent : C.blad;
+
+  return (
+    <View style={s.stopkaWiersz}>
+      <Text style={s.stopkaEtykieta}>{etykieta}</Text>
+      <Text style={[s.stopkaWartosc, { color: kolor }]}>{opis}</Text>
     </View>
   );
 }
@@ -385,4 +438,5 @@ const s = StyleSheet.create({
   stopkaWiersz: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   stopkaEtykieta: { color: C.tekstPrzygaszony, fontSize: 13 },
   stopkaWartosc: { color: C.tekst, fontSize: 13, maxWidth: '60%' },
+  powod: { color: C.blad, fontSize: 12, lineHeight: 17, marginTop: 8 },
 });
