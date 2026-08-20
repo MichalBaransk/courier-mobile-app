@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Pressable,
   RefreshControl,
@@ -38,6 +39,11 @@ import {
   zatrzymajSledzenieTla,
 } from './src/gpsTlo';
 import { decyzjaSledzenia } from './src/gpsTloReguly';
+import { minutTrwania } from './src/limity';
+import {
+  pokazPowiadomienieZmiany,
+  schowajPowiadomienieZmiany,
+} from './src/powiadomienieZmiany';
 import {
   dodaj as dodajDoKolejki,
   nastepny,
@@ -645,8 +651,51 @@ function Aplikacja() {
    * pokazuje ostatni zjazd doby, więc po zamknięciu pierwszej zmiany był już
    * ustawiony i druga, trwająca, nie włączyłaby GPS-a.
    */
-  const zmianaTrwa =
-    dzien !== null && dzien.date === dzisiaj && dzien.sesje.some((sz) => sz.do === null);
+  /**
+   * Godzina wyjazdu trwającej zmiany. `null` = zamknięta, `undefined` = NIE WIADOMO.
+   *
+   * ⚠️ TE TRZY STANY SĄ ISTOTNE. Wcześniej stało tu wyliczenie wprost
+   * z `dzien` — czyli z dnia, na który AKURAT PATRZYSZ. Skutek: dotknięcie
+   * daty wstecznej w kalendarzu przy otwartej zmianie robiło z `zmianaTrwa`
+   * fałsz i:
+   *
+   *  - gasło podtrzymywanie ekranu,
+   *  - zatrzymywało się śledzenie GPS (od kroku 32 razem z usługą w tle),
+   *  - przycisk na pasku zmieniał się w „Start", więc dotknięcie go otwierało
+   *    drugą zmianę i serwer odpowiadał 409.
+   *
+   * Do kroku 32 nikt tego nie zauważył, bo śledzenie na pierwszym planie
+   * i tak ginęło przy przełączeniu okna. Usługa w tle ma żyć dalej — więc
+   * warunek musi opisywać STAN DZISIEJSZEJ DOBY, a nie stan ekranu.
+   *
+   * `undefined` jest osobno, bo „nie wiem" nie może znaczyć „zamknięta":
+   * przy starcie aplikacji zatrzymałoby to usługę, która poprawnie chodzi.
+   */
+  const [otwartaOd, setOtwartaOd] = useState<string | null | undefined>(undefined);
+
+  /** Każda odpowiedź dotycząca DZISIAJ aktualizuje stan zmiany. Inne dni ignorujemy. */
+  useEffect(() => {
+    if (dzien === null || dzisiaj === null || dzien.date !== dzisiaj) return;
+    setOtwartaOd(dzien.sesje.find((sz) => sz.do === null)?.od ?? null);
+  }, [dzien, dzisiaj]);
+
+  /**
+   * Jednorazowe ustalenie stanu przy starcie.
+   *
+   * Bez tego aplikacja otwarta z zaznaczonym dniem wstecznym nie wie nic
+   * o dzisiejszej dobie — a to właśnie ta wiedza decyduje o zatrzymaniu
+   * usługi w tle. Jedno dodatkowe żądanie na uruchomienie.
+   */
+  useEffect(() => {
+    if (stan !== 'gotowe' || !token || dzisiaj === null || otwartaOd !== undefined) return;
+    getDzien(token, dzisiaj)
+      .then((d) => setOtwartaOd(d.sesje.find((sz) => sz.do === null)?.od ?? null))
+      .catch(() => {
+        /* nie wiemy — zostaje `undefined`, czyli nic nie zatrzymujemy */
+      });
+  }, [stan, token, dzisiaj, otwartaOd]);
+
+  const zmianaTrwa = otwartaOd != null;
 
 
   /**
@@ -752,6 +801,17 @@ function Aplikacja() {
 
     void (async () => {
       if (await uruchomSledzenieTla(ustawienia.wysokaDokladnosc)) {
+        /**
+         * Usługa GPS wystawiła własny, nieusuwalny wpis w pasku — nasz jest
+         * od tej chwili zbędny.
+         *
+         * Zdejmujemy go TUTAJ, a nie polegamy na kontroli w
+         * `pokazPowiadomienieZmiany`: efekt uzgadniający potrafi zdążyć
+         * pierwszy, gdy usługa jeszcze się podnosi, i wtedy w pasku wisiałyby
+         * dwa wpisy o tej samej rzeczy.
+         */
+        await schowajPowiadomienieZmiany();
+
         // Zadanie w tle żyje własnym życiem i NIE jest sprzątane przez
         // `return` tego efektu — ma przeżyć zamknięcie ekranu. Zatrzymuje je
         // osobny efekt uzgadniający, niżej.
@@ -792,7 +852,9 @@ function Aplikacja() {
    * aplikacji w ogóle nie otworzył, siedzi w samym zadaniu (`czyOsierocone`).
    */
   useEffect(() => {
-    if (stan !== 'gotowe') return;
+    // `undefined` = nie wiemy, jak jest. Zatrzymywanie czegokolwiek na tej
+    // podstawie byłoby zgadywaniem, a stawką jest usługa, która poprawnie chodzi.
+    if (stan !== 'gotowe' || otwartaOd === undefined) return;
 
     void (async () => {
       const decyzja = decyzjaSledzenia({
@@ -801,8 +863,22 @@ function Aplikacja() {
         zadanieChodzi: await czySledzenieChodzi(),
       });
       if (decyzja === 'stop') await zatrzymajSledzenieTla();
+
+      /**
+       * Powiadomienie idzie ZA decyzją o śledzeniu, nie przed nią.
+       *
+       * `pokazPowiadomienieZmiany` odpuszcza, gdy usługa GPS już wisi
+       * w pasku — a to, czy wisi, rozstrzyga się linijkę wyżej. Odwrotna
+       * kolejność dawałaby dwa wpisy o tej samej rzeczy przy otwieraniu
+       * zmiany i zero przy zamykaniu.
+       */
+      if (zmianaTrwa) {
+        await pokazPowiadomienieZmiany(otwartaOd);
+      } else {
+        await schowajPowiadomienieZmiany();
+      }
     })();
-  }, [stan, zmianaTrwa, ustawienia.wysylajPozycje]);
+  }, [stan, zmianaTrwa, otwartaOd, ustawienia.wysylajPozycje]);
 
   /**
    * Powrót z tła to najlepszy moment na ponowienie.
@@ -914,6 +990,45 @@ function Aplikacja() {
   const przelaczZmiane = useCallback(async () => {
     if (!token || przelaczamZmiane) return;
 
+    /**
+     * Pytanie przy bardzo krótkiej zmianie.
+     *
+     * Serwer od 20.08 zapisuje zmianę dowolnej długości, łącznie z zerową —
+     * bo wyjazd i natychmiastowy powrót to prawdziwe zdarzenie, a kurier
+     * zostawał wcześniej z otwartą zmianą, której nie dało się zamknąć.
+     *
+     * Skoro zakazu nie ma, zostaje jedyne realne ryzyko: dwa dotknięcia
+     * przycisku pod rząd, w rękawicy, przy motocyklu. Stąd pytanie zamiast
+     * zakazu — decyzja wraca do człowieka, a dane nie są niczyim zakładnikiem.
+     *
+     * Liczone z zegara telefonu i to wystarcza: godzinę zjazdu wyznacza
+     * serwer (`'TERAZ'`), a ta liczba służy wyłącznie do zadania pytania.
+     */
+    if (zmianaTrwa && otwartaOd) {
+      const teraz = new Date();
+      const minut = minutTrwania(
+        otwartaOd,
+        `${String(teraz.getHours()).padStart(2, '0')}:${String(teraz.getMinutes()).padStart(2, '0')}`
+      );
+
+      if (minut !== null && minut < 15) {
+        const potwierdzone = await new Promise<boolean>((odpowiedz) => {
+          Alert.alert(
+            'Zamknąć zmianę?',
+            minut === 0
+              ? `Zmiana od ${otwartaOd} trwa niecałą minutę.`
+              : `Zmiana od ${otwartaOd} trwa dopiero ${minut} min.`,
+            [
+              { text: 'Wróć', style: 'cancel', onPress: () => odpowiedz(false) },
+              { text: 'Zamknij zmianę', onPress: () => odpowiedz(true) },
+            ],
+            { onDismiss: () => odpowiedz(false) }
+          );
+        });
+        if (!potwierdzone) return;
+      }
+    }
+
     setPrzelaczamZmiane(true);
     setBlad(null);
     try {
@@ -947,7 +1062,7 @@ function Aplikacja() {
     } finally {
       setPrzelaczamZmiane(false);
     }
-  }, [token, przelaczamZmiane, zmianaTrwa, poZmianie]);
+  }, [token, przelaczamZmiane, zmianaTrwa, otwartaOd, poZmianie]);
 
   if (stan === 'wczytywanie') {
     return (

@@ -151,7 +151,7 @@ export function ocenParagon(
 /**
  * Ocena zmiany na podstawie godzin `GG:MM`.
  *
- * Powtarza regułę `calculateHours` z serwera (§8d): dopuszczalne 0,25–16 h,
+ * Powtarza regułę `calculateHours` z serwera (§8d): do 16 h,
  * przejście przez północ jest normalne. Powtarzam ją TYLKO po to, żeby
  * ostrzec przed wysłaniem — decyzja i tak należy do serwera, który przy
  * wartości spoza zakresu zapisze `hours: null` i odeśle komunikat.
@@ -211,7 +211,10 @@ export function ocenZmiane(
   if (godzin < 0.25) {
     return {
       blad: null,
-      ostrzezenie: `${od} – ${doGodz} to ${pl(Math.round(godzin * 60))} minut. Serwer nie zapisze zmiany krótszej niż 15 minut.`,
+      // Od 20.08 serwer TAKIE zmiany zapisuje — dolny próg 0,25 h zniknął.
+      // Zostaje ostrzeżenie, bo kwadrans pracy to nadal częściej literówka
+      // niż prawda; decyzję zostawiamy kurierowi.
+      ostrzezenie: `${od} – ${doGodz} to ${pl(Math.round(godzin * 60))} minut. Sprawdź, czy godziny się zgadzają.`,
     };
   }
   if (godzin > 16) {
@@ -261,4 +264,22 @@ export function polacz(...oceny: Ocena[]): Ocena {
   const blad = oceny.find((o) => o.blad !== null)?.blad ?? null;
   if (blad !== null) return { blad, ostrzezenie: null };
   return { blad: null, ostrzezenie: oceny.find((o) => o.ostrzezenie !== null)?.ostrzezenie ?? null };
+}
+
+/**
+ * Ile minut trwa zmiana otwarta o `od`, przy zegarze wskazującym `teraz`.
+ *
+ * Osobno od `ocenZmiane`, bo służy do czego innego: tam chodzi o wpis, który
+ * użytkownik wystukał, tutaj o zmianę, którą właśnie zamyka przyciskiem.
+ *
+ * Zegar telefonu wystarczy, bo wynik NIE trafia do bazy — godzinę zjazdu
+ * wyznacza serwer (`'TERAZ'`). Ta liczba służy wyłącznie do zadania pytania
+ * „na pewno?", więc minuta różnicy niczego nie psuje.
+ */
+export function minutTrwania(od: string, teraz: string): number | null {
+  const a = minutyGodziny(od);
+  const b = minutyGodziny(teraz);
+  if (a === null || b === null) return null;
+  // Zjazd przed wyjazdem = przejechana północ, tak samo jak w `ocenZmiane`.
+  return (b - a + 1440) % 1440;
 }

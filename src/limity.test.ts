@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ocenLiczbe, ocenParagon, ocenZmiane, polacz } from './limity';
+import { minutTrwania, ocenLiczbe, ocenParagon, ocenZmiane, polacz } from './limity';
 
 /**
  * Progi rozsądku — warstwa, która łapie literówkę, zanim ta wejdzie do bazy.
@@ -164,5 +164,23 @@ describe('polacz', () => {
       blad: null,
       ostrzezenie: 'o2',
     });
+  });
+});
+
+describe('minutTrwania — do pytania „na pewno?"', () => {
+  it('liczy zwykły odstęp', () => {
+    expect(minutTrwania('10:00', '10:07')).toBe(7);
+  });
+
+  it('zero znaczy zero, a nie dobę', () => {
+    expect(minutTrwania('10:00', '10:00')).toBe(0);
+  });
+
+  it('przejście przez północ', () => {
+    expect(minutTrwania('23:50', '00:05')).toBe(15);
+  });
+
+  it('śmieć na wejściu daje null, a nie liczbę', () => {
+    expect(minutTrwania('abc', '10:00')).toBeNull();
   });
 });
